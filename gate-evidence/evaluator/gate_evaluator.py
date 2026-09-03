@@ -1,8 +1,12 @@
 from enum import Enum
-from typing import Iterable
-from gate_evidence.collector.models import GateEvidence,EvidenceStatus
-class PromotionDecision(str,Enum):
- ALLOW='ALLOW';BLOCK='BLOCK'
-def evaluate(required_gates:Iterable[GateEvidence])->PromotionDecision:
- gates=list(required_gates)
- return PromotionDecision.ALLOW if gates and all(g.status==EvidenceStatus.SUCCESS for g in gates) else PromotionDecision.BLOCK
+
+class PromotionDecision(str, Enum):
+    ALLOW = "ALLOW"
+    BLOCK = "BLOCK"
+
+def _status(value):
+    return getattr(value, "value", value)
+
+def evaluate(required_gates):
+    gates = list(required_gates)
+    return PromotionDecision.ALLOW if gates and all(_status(g.status) == "SUCCESS" for g in gates) else PromotionDecision.BLOCK
