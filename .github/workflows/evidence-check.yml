@@ -1,0 +1,24 @@
+name: evidence-check
+
+on:
+  pull_request:
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate evidence schema and evidence policy
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('schemas/evidence/evidence-record.schema.json')
+          schema=json.loads(p.read_text())
+          required={'evidence_id','task_id','repository','commit_sha','recorded_at','validation'}
+          if not required.issubset(schema.get('required', [])):
+              raise SystemExit('evidence schema missing required fields')
+          if schema.get('properties',{}).get('commit_sha',{}).get('pattern') != '^[0-9a-fA-F]{40}$':
+              raise SystemExit('evidence SHA constraint missing')
+          print('evidence schema: valid')
+          PY

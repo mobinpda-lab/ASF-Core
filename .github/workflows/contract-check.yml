@@ -1,0 +1,30 @@
+name: contract-check
+
+on:
+  pull_request:
+  push:
+    branches: [main, factory/foundation-structure-20260903]
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check required contracts
+        run: |
+          set -e
+          test -s core/orchestrator/CONTRACT.md
+          test -s core/queue/CONTRACT.md
+          test -s core/workers/CONTRACT.md
+          test -s core/evidence/CONTRACT.md
+          test -s core/state/CONTRACT.md
+          test -s adapters/PRODUCT_ADAPTER_CONTRACT.md
+      - name: Check adapter boundary references
+        run: python - <<'PY'
+          from pathlib import Path
+          p=Path('adapters/PRODUCT_ADAPTER_CONTRACT.md').read_text()
+          required=['intake','state','validation','Isolation']
+          missing=[x for x in required if x not in p]
+          if missing: raise SystemExit(f'missing adapter contract terms: {missing}')
+          print('adapter boundary contract: valid')
+          PY
