@@ -1,9 +1,16 @@
 # Gate Evidence Aggregator Runtime
 
-Boundary: Evidence Matrix -> Gate Evaluator -> Promotion Decision. ASF-Core owns collection, exact-SHA correlation, append-only evidence, fail-closed evaluation, and decision production. Product repositories remain isolated.
+## Integration boundary
+Evidence Matrix -> Gate Evaluator -> Promotion Decision -> Production Orchestrator.
 
-Collectors cover workflow runs, check runs, jobs, and artifacts. Correlation keys cover repository, exact commit SHA, workflow, event, run, job, artifact, and check identifiers.
+## Collection and correlation
+Collector interfaces cover workflow runs, check runs, jobs, and artifacts. Evidence carries repository, exact commit SHA, workflow/event, run, job, artifact, check, branch, status, and timestamp. Correlation accepts only exact repository+SHA matches.
 
-Statuses: SUCCESS, FAILURE, PENDING, NOT_FOUND, NOT_EXPOSED. ALLOW requires every required gate to be SUCCESS; otherwise BLOCK. Empty required-gate input blocks.
+## Fail-closed evaluation
+Required gates are ALLOW only when every gate is SUCCESS. FAILURE, PENDING, NOT_FOUND, NOT_EXPOSED, empty input, stale SHA, or wrong branch context blocks promotion.
 
-Evidence storage is append-only; duplicate evidence IDs are rejected. Existing records are not mutated. Recovery requires fresh evidence collection before promotion.
+## Storage
+Evidence is append-only and duplicate evidence IDs are rejected; existing records are never silently rewritten.
+
+## Recovery
+After recovery/retry, evidence must be recollected for the exact candidate SHA before a new promotion decision. Secrets are outside the evidence model.
