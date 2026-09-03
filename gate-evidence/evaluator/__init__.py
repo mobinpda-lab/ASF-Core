@@ -1,1 +1,1 @@
-"""Fail-closed gate evaluator."""
+"""Fail-closed gate evaluation."""

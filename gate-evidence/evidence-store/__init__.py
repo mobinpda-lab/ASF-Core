@@ -1,1 +1,1 @@
-"""Append-only evidence storage interfaces."""
+"""Append-only evidence store."""
