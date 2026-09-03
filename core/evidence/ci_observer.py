@@ -1,12 +1,9 @@
-"""Normalized, fail-closed CI/CD evidence observation model.
-
-The adapter-facing observer deliberately does not manufacture evidence. Callers
-must supply authoritative source observations; missing access is NOT_EXPOSED,
-while an authoritative empty source is NOT_FOUND.
-"""
+"""Normalized, fail-closed CI/CD evidence observation model."""
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Iterable, Mapping
+
+from .provider import ObservationState, ProviderObservation
 
 
 class Visibility(str, Enum):
@@ -27,6 +24,9 @@ class EvidenceRecord:
     artifacts: tuple[Mapping[str, Any], ...]
     statuses: tuple[Mapping[str, Any], ...]
     state: Visibility
+    provider_observation: ObservationState = ObservationState.AVAILABLE
+    provider_confidence: str = "HIGH"
+    provider_reason: str = ""
 
 
 class EvidenceObserver:
@@ -35,13 +35,36 @@ class EvidenceObserver:
     def observe(self, repository: str, commit_sha: str, source: Mapping[str, Any]) -> EvidenceRecord:
         self._validate_sha(commit_sha)
         if source.get("accessible") is False:
-            return EvidenceRecord(repository, commit_sha, (), (), (), (), (), Visibility.NOT_EXPOSED)
-
+            return self._record(repository, commit_sha, {}, Visibility.NOT_EXPOSED, ObservationState.UNAVAILABLE, "LOW", "provider access unavailable")
         sections = ("workflow_runs", "check_runs", "jobs", "artifacts", "statuses")
         values = {name: tuple(source.get(name) or ()) for name in sections}
         self._reject_mismatch(repository, commit_sha, values.values())
+        provider_state = ObservationState.AVAILABLE
+        if source.get("delayed") is True or source.get("retry_after") is not None:
+            provider_state = ObservationState.DELAYED
+        elif source.get("inconsistent") is True:
+            provider_state = ObservationState.INCONSISTENT
+        elif any(name not in source for name in sections):
+            provider_state = ObservationState.PARTIAL
         state = self._classify(values)
-        return EvidenceRecord(repository, commit_sha, *(values[name] for name in sections), state)
+        if provider_state is not ObservationState.AVAILABLE:
+            state = Visibility.NOT_EXPOSED if provider_state in {ObservationState.UNAVAILABLE, ObservationState.INCONSISTENT} else Visibility.PENDING
+        return EvidenceRecord(repository, commit_sha, *(values[name] for name in sections), state, provider_state, "HIGH" if provider_state is ObservationState.AVAILABLE else "LOW", provider_state.value.lower())
+
+    def observe_provider(self, repository: str, commit_sha: str, observation: ProviderObservation) -> EvidenceRecord:
+        self._validate_sha(commit_sha)
+        if observation.observation is not ObservationState.AVAILABLE:
+            state = Visibility.NOT_EXPOSED if observation.observation in {ObservationState.UNAVAILABLE, ObservationState.INCONSISTENT, ObservationState.PARTIAL} else Visibility.PENDING
+            return self._record(repository, commit_sha, observation.data, state, observation.observation, observation.confidence, observation.reason)
+        values = {name: tuple(observation.data.get(name) or ()) for name in ("workflow_runs", "check_runs", "jobs", "artifacts", "statuses")}
+        self._reject_mismatch(repository, commit_sha, values.values())
+        return self._record(repository, commit_sha, values, self._classify(values), observation.observation, observation.confidence, observation.reason)
+
+    @staticmethod
+    def _record(repository: str, commit_sha: str, values: Mapping[str, Any], state: Visibility, provider: ObservationState, confidence: str, reason: str) -> EvidenceRecord:
+        names = ("workflow_runs", "check_runs", "jobs", "artifacts", "statuses")
+        normalized = {n: tuple(values.get(n) or ()) for n in names}
+        return EvidenceRecord(repository, commit_sha, *(normalized[n] for n in names), state, provider, confidence, reason)
 
     @staticmethod
     def _validate_sha(sha: str) -> None:
@@ -60,9 +83,7 @@ class EvidenceObserver:
 
     @staticmethod
     def _classify(values: Mapping[str, tuple[Mapping[str, Any], ...]]) -> Visibility:
-        runs = values["workflow_runs"]
-        checks = values["check_runs"]
-        jobs = values["jobs"]
+        runs, checks, jobs = values["workflow_runs"], values["check_runs"], values["jobs"]
         if not runs and not checks and not jobs and not values["statuses"]:
             return Visibility.NOT_FOUND
         conclusions = [str(x.get("conclusion", "")).lower() for x in (*runs, *checks, *jobs)]
