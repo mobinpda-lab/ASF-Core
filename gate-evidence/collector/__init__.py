@@ -1,0 +1,1 @@
+"""Gate Evidence Aggregator collectors."""
