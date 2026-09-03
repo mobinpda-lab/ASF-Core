@@ -46,7 +46,7 @@ class EvidenceObserver:
             provider_state = ObservationState.INCONSISTENT
         elif any(name not in source for name in sections):
             provider_state = ObservationState.PARTIAL
-        state = self._classify(values)
+        state = self._classify(values, authoritative_not_found=source.get("authoritative_not_found") is True)
         if provider_state is not ObservationState.AVAILABLE:
             state = Visibility.NOT_EXPOSED if provider_state in {ObservationState.UNAVAILABLE, ObservationState.INCONSISTENT} else Visibility.PENDING
         return EvidenceRecord(repository, commit_sha, *(values[name] for name in sections), state, provider_state, "HIGH" if provider_state is ObservationState.AVAILABLE else "LOW", provider_state.value.lower())
@@ -58,7 +58,7 @@ class EvidenceObserver:
             return self._record(repository, commit_sha, observation.data, state, observation.observation, observation.confidence, observation.reason)
         values = {name: tuple(observation.data.get(name) or ()) for name in ("workflow_runs", "check_runs", "jobs", "artifacts", "statuses")}
         self._reject_mismatch(repository, commit_sha, values.values())
-        return self._record(repository, commit_sha, values, self._classify(values), observation.observation, observation.confidence, observation.reason)
+        return self._record(repository, commit_sha, values, self._classify(values, authoritative_not_found=observation.data.get("authoritative_not_found") is True), observation.observation, observation.confidence, observation.reason)
 
     @staticmethod
     def _record(repository: str, commit_sha: str, values: Mapping[str, Any], state: Visibility, provider: ObservationState, confidence: str, reason: str) -> EvidenceRecord:
@@ -82,10 +82,10 @@ class EvidenceObserver:
                     raise ValueError("stale or mismatched commit SHA")
 
     @staticmethod
-    def _classify(values: Mapping[str, tuple[Mapping[str, Any], ...]]) -> Visibility:
+    def _classify(values: Mapping[str, tuple[Mapping[str, Any], ...]], authoritative_not_found: bool = False) -> Visibility:
         runs, checks, jobs = values["workflow_runs"], values["check_runs"], values["jobs"]
         if not runs and not checks and not jobs and not values["statuses"]:
-            return Visibility.NOT_FOUND
+            return Visibility.NOT_FOUND if authoritative_not_found else Visibility.NOT_EXPOSED
         conclusions = [str(x.get("conclusion", "")).lower() for x in (*runs, *checks, *jobs)]
         if any(c in {"failure", "cancelled", "timed_out", "action_required"} for c in conclusions):
             return Visibility.FAILURE
