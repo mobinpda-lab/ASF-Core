@@ -6,7 +6,7 @@ def load(p):
 c=load(ROOT/'gate-evidence/collector/models.py');e=load(ROOT/'gate-evidence/evaluator/gate_evaluator.py');st=load(ROOT/'gate-evidence/evidence-store/store.py')
 def ev(x,sha='a'*40):return c.GateEvidence('repo',sha,status=c.EvidenceStatus(x),timestamp='2026-09-04T00:00:00+03:30')
 def test_success():assert e.evaluate([ev('SUCCESS')])==e.PromotionDecision.ALLOW
-def test_blocking_states():
+def test_blocking():
  for x in ('FAILURE','PENDING','NOT_FOUND','NOT_EXPOSED'):assert e.evaluate([ev(x)])==e.PromotionDecision.BLOCK
 def test_empty():assert e.evaluate([])==e.PromotionDecision.BLOCK
 def test_stale_sha():
