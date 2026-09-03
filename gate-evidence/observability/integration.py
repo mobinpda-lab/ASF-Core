@@ -15,4 +15,19 @@ def from_gate_evidence(evidence, gate_name):
     else:
         visibility, reason = _obs.VisibilityState.WORKFLOW_VISIBLE, "workflow evidence is visible for the exact SHA"
     confidence = _obs.ObservationConfidence.HIGH if status in {"SUCCESS", "FAILURE", "PENDING"} else _obs.ObservationConfidence.LOW
-    return _obs.FactoryObservation(evidence.repository, evidence.commit_sha, gate_name, evidence.workflow, evidence.event, evidence.run_id, getattr(evidence, "check_id", None), evidence.jobs, evidence.artifacts, visibility, confidence, evidence.timestamp, reason)
+    return _obs.FactoryObservation(
+        repository=evidence.repository,
+        commit_sha=evidence.commit_sha,
+        gate_name=gate_name,
+        workflow_identity=evidence.workflow,
+        event_type=evidence.event,
+        run_id=evidence.run_id,
+        check_id=getattr(evidence, "check_id", None),
+        job_results=evidence.jobs,
+        artifact_results=evidence.artifacts,
+        visibility_state=visibility,
+        confidence=confidence,
+        timestamp=evidence.timestamp,
+        reason=reason,
+        status=_obs.ObservationStatus(status),
+    )
