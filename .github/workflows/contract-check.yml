@@ -2,6 +2,8 @@ name: contract-check
 
 on:
   pull_request:
+  push:
+    branches: [main, factory/foundation-structure-20260903]
 
 jobs:
   contracts:
