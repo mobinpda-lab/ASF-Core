@@ -9,17 +9,22 @@ def test_successful_workflow_evidence():
     assert EvidenceObserver().observe("org/repo", SHA, source).state is Visibility.SUCCESS
 
 
-def test_missing_workflow_is_not_found():
-    assert EvidenceObserver().observe("org/repo", SHA, {}).state is Visibility.NOT_FOUND
+def test_missing_workflow_is_not_exposed_without_authoritative_absence():
+    assert EvidenceObserver().observe("org/repo", SHA, {}).state is Visibility.NOT_EXPOSED
+
+
+def test_authoritative_missing_workflow_is_not_found():
+    source = {"authoritative_not_found": True}
+    assert EvidenceObserver().observe("org/repo", SHA, source).state is Visibility.NOT_FOUND
 
 
 def test_inaccessible_workflow_is_not_exposed():
     assert EvidenceObserver().observe("org/repo", SHA, {"accessible": False}).state is Visibility.NOT_EXPOSED
 
 
-def test_empty_status_does_not_create_success():
+def test_empty_status_does_not_create_not_found_without_authoritative_absence():
     record = EvidenceObserver().observe("org/repo", SHA, {"statuses": []})
-    assert record.state is Visibility.NOT_FOUND
+    assert record.state is Visibility.NOT_EXPOSED
 
 
 def test_stale_sha_rejected():
