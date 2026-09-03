@@ -11,8 +11,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate JSON schemas
-        run: python -m unittest tests.contract-tests.schema_contract_test
-      - name: Validate contracts and adapter boundary
-        run: python -m unittest tests.contract-tests.adapter_boundary_test
+        run: python -m unittest discover -s tests/contract-tests -p '*_test.py'
       - name: Validate integration foundation
-        run: python -m unittest tests.integration-tests.foundation_integration_test
+        run: python -m unittest discover -s tests/integration-tests -p '*_test.py'
