@@ -1,5 +1,5 @@
 # Gate Evidence Aggregator Runtime
 
-Reusable ASF-Core runtime for exact-head gate evidence collection, correlation, append-only storage, fail-closed evaluation, and promotion decisions.
+Reusable ASF-Core runtime: collectors -> exact-head correlation -> append-only evidence store -> fail-closed gate matrix -> Promotion Decision -> Production Orchestrator.
 
-Runtime boundary: Evidence Matrix -> Gate Evaluator -> Promotion Decision -> Production Orchestrator.
+Required gate states: SUCCESS, FAILURE, PENDING, NOT_FOUND, NOT_EXPOSED. Only all-required-SUCCESS can produce ALLOW.
