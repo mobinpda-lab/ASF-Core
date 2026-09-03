@@ -87,7 +87,8 @@ class QueueCore:
     def fail(self, context: ExecutionContext, retry_at: Optional[float] = None) -> Task:
         self._assert_lease(context)
         state = QueueState.RETRY_WAIT if retry_at is not None else QueueState.FAILED
-        task = replace(self._tasks[context.task.task_id], state=state, available_at=retry_at or self._clock(), lease_id=None)
+        available_at = retry_at if retry_at is not None else self._clock()
+        task = replace(self._tasks[context.task.task_id], state=state, available_at=available_at, lease_id=None)
         self._tasks[task.task_id] = task
         self._leases.pop(context.lease.lease_id, None)
         return task
