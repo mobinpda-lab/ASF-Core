@@ -36,17 +36,20 @@ jobs:
         run: python -m pytest -q factory/tests/test_registered_client_e2e.py --junitxml=e2e-junit.xml
       - name: Emit E2E evidence
         shell: bash
+        env:
+          E2E_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          E2E_RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json
+          import json, os
           from pathlib import Path
           report = {
             "schema_version": "1.0",
             "repo": "mobinpda-lab/ASF-Core",
-            "exact_head_sha": "${GITHUB_SHA}",
+            "exact_head_sha": os.environ["E2E_HEAD_SHA"],
             "workflow": "ASF-Core Factory E2E",
-            "run_id": "${GITHUB_RUN_ID}",
+            "run_id": int(os.environ["E2E_RUN_ID"]),
             "registered_client": "e2e-asf-core-client",
             "lifecycle": ["REGISTERED", "READY", "LEASED", "RUNNING", "VALIDATING", "FAILED_PROBE", "REQUEUED", "PROMOTABLE", "COMPLETED"],
             "fencing": "VERIFIED",
@@ -60,7 +63,7 @@ jobs:
           Path("registered-client-e2e.json").write_text(json.dumps(report, indent=2) + "\n")
           PY
           test -s registered-client-e2e.json
-          jq -e '.observation_state == "VERIFIED" and .confidence == "HIGH" and .promotion_gate == "PASS"' registered-client-e2e.json >/dev/null
+          jq -e '.observation_state == "VERIFIED" and .confidence == "HIGH" and .promotion_gate == "PASS" and (.exact_head_sha | length) == 40' registered-client-e2e.json >/dev/null
       - name: Upload E2E evidence
         uses: actions/upload-artifact@v4
         with:
