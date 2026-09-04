@@ -19,7 +19,10 @@ concurrency:
 
 env:
   REPO: ${{ github.repository }}
-  BOOTSTRAP_PR: '9'
+  BOOTSTRAP_PR: '12'
+  BOOTSTRAP_HEAD_SHA: 'af9ad00dcfdbde70f5ec0c244c0e4c5b5062569f'
+  BOOTSTRAP_BASE_SHA: '9afbad7264b84619bb307d34e19eb2c0bb6d0398'
+  BOOTSTRAP_ARTIFACT: 'asf-core-test-results'
 
 jobs:
   promote:
@@ -47,28 +50,39 @@ jobs:
             merged=$(jq -r '.merged' <<<"$json")
             draft=$(jq -r '.draft' <<<"$json")
             head=$(jq -r '.head.sha' <<<"$json")
+            base_sha=$(jq -r '.base.sha' <<<"$json")
             mergeable=$(jq -r '.mergeable' <<<"$json")
-            expected_head=$(git rev-parse HEAD)
 
             [[ "$state" == "open" ]] || { echo "BLOCK bootstrap PR#$pr state=$state"; exit 1; }
             [[ "$merged" == "false" ]] || { echo "BLOCK bootstrap PR#$pr already merged"; exit 1; }
             [[ "$draft" == "false" ]] || { echo "BLOCK bootstrap PR#$pr draft=true"; exit 1; }
-            [[ "$head" == "$expected_head" ]] || { echo "BLOCK bootstrap PR#$pr stale head=$head expected=$expected_head"; exit 1; }
+            [[ "$head" == "$BOOTSTRAP_HEAD_SHA" ]] || { echo "BLOCK bootstrap PR#$pr HEAD_DRIFT head=$head expected=$BOOTSTRAP_HEAD_SHA"; exit 1; }
+            [[ "$base_sha" == "$BOOTSTRAP_BASE_SHA" ]] || { echo "BLOCK bootstrap PR#$pr BASE_DRIFT base=$base_sha expected=$BOOTSTRAP_BASE_SHA"; exit 1; }
             [[ "$mergeable" != "false" ]] || { echo "BLOCK bootstrap PR#$pr mergeable=false"; exit 1; }
 
-            runs=$(gh run list --repo "$repo" --commit "$head" --json databaseId,status,conclusion,workflowName --limit 20)
-            success_runs=$(jq '[.[] | select(.status == "completed" and .conclusion == "success" and .workflowName == "ASF-Core CI")] | length' <<<"$runs")
-            [[ "$success_runs" -gt 0 ]] || { echo "BLOCK bootstrap PR#$pr no exact-head successful ASF-Core CI"; exit 1; }
-            run_id=$(jq -r '[.[] | select(.status == "completed" and .conclusion == "success" and .workflowName == "ASF-Core CI")][0].databaseId' <<<"$runs")
-            artifact_count=$(gh api "repos/$repo/actions/runs/$run_id/artifacts" --jq '[.artifacts[] | select(.name == "asf-core-test-results" and .expired == false)] | length')
-            [[ "$artifact_count" -gt 0 ]] || { echo "BLOCK bootstrap PR#$pr run=$run_id missing artifact"; exit 1; }
+            runs=$(gh run list --repo "$repo" --commit "$head" --json databaseId,status,conclusion,workflowName,headSha --limit 20)
+            run_id=$(jq -r --arg sha "$head" '[.[] | select(.headSha == $sha and .status == "completed" and .conclusion == "success" and .workflowName == "ASF-Core CI")][0].databaseId // empty' <<<"$runs")
+            [[ -n "$run_id" ]] || { echo "BLOCK bootstrap PR#$pr no exact-head successful ASF-Core CI"; exit 1; }
+
+            artifact_count=$(gh api "repos/$repo/actions/runs/$run_id/artifacts" --jq --arg artifact "$BOOTSTRAP_ARTIFACT" '[.artifacts[] | select(.name == $artifact and .expired == false)] | length')
+            [[ "$artifact_count" -gt 0 ]] || { echo "BLOCK bootstrap PR#$pr run=$run_id missing artifact=$BOOTSTRAP_ARTIFACT"; exit 1; }
 
             current_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
-            echo "BOOTSTRAP_READY PR#$pr head=$head run=$run_id main=$current_main"
-            gh pr merge "$pr" --repo "$repo" --squash --delete-branch=false --subject "promote(asf-core): PR#9 governed bootstrap" --body "ASF-MOC v9.0 Production Orchestrator bootstrap: exact-head, authentic CI, artifact evidence, fail-closed validation."
+            [[ "$current_main" == "$BOOTSTRAP_BASE_SHA" ]] || { echo "BLOCK bootstrap main HEAD_DRIFT main=$current_main expected=$BOOTSTRAP_BASE_SHA"; exit 1; }
+            echo "BOOTSTRAP_READY PR#$pr head=$head base=$base_sha run=$run_id artifact=$BOOTSTRAP_ARTIFACT main=$current_main"
+
+            gh pr merge "$pr" --repo "$repo" --squash --delete-branch=false --subject "promote(asf-core): PR#12 governed bootstrap" --body "ASF-MOC v9.0 Production Orchestrator: PR#12 explicitly authorized as architectural bootstrap target; exact-head, exact-base, authentic CI artifact, and fail-closed validation."
+
+            merged_json=$(gh api "repos/$repo/pulls/$pr")
+            merged=$(jq -r '.merged' <<<"$merged_json")
+            merge_commit=$(jq -r '.merge_commit_sha' <<<"$merged_json")
+            [[ "$merged" == "true" ]] || { echo "BLOCK bootstrap PR#$pr merge not confirmed"; exit 1; }
+            [[ -n "$merge_commit" && "$merge_commit" != "null" ]] || { echo "BLOCK bootstrap PR#$pr missing merge_commit_sha"; exit 1; }
+
             new_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
+            [[ "$new_main" == "$merge_commit" ]] || { echo "BLOCK bootstrap main postcondition mismatch main=$new_main merge_commit=$merge_commit"; exit 1; }
             [[ "$new_main" != "$current_main" ]] || { echo "BLOCK bootstrap main unchanged"; exit 1; }
-            echo "BOOTSTRAP_PROMOTED PR#$pr new_main=$new_main"
+            echo "BOOTSTRAP_PROMOTED PR#$pr merge_commit=$merge_commit new_main=$new_main"
             exit 0
           fi
 
@@ -92,11 +106,10 @@ jobs:
             [[ "$head" == "${HEADS[$pr]}" ]] || { echo "BLOCK PR#$pr stale head=$head expected=${HEADS[$pr]}"; exit 1; }
             [[ "$mergeable" != "false" ]] || { echo "BLOCK PR#$pr mergeable=false"; exit 1; }
 
-            runs=$(gh run list --repo "$repo" --commit "$head" --json databaseId,status,conclusion,workflowName --limit 20)
-            success_runs=$(jq '[.[] | select(.status == "completed" and .conclusion == "success" and .workflowName == "ASF-Core CI")] | length' <<<"$runs")
-            [[ "$success_runs" -gt 0 ]] || { echo "BLOCK PR#$pr no exact-head successful ASF-Core CI run"; exit 1; }
-            run_id=$(jq -r '[.[] | select(.status == "completed" and .conclusion == "success" and .workflowName == "ASF-Core CI")][0].databaseId' <<<"$runs")
-            artifact_count=$(gh api "repos/$repo/actions/runs/$run_id/artifacts" --jq '[.artifacts[] | select(.name == "asf-core-test-results" and .expired == false)] | length')
+            runs=$(gh run list --repo "$repo" --commit "$head" --json databaseId,status,conclusion,workflowName,headSha --limit 20)
+            run_id=$(jq -r --arg sha "$head" '[.[] | select(.headSha == $sha and .status == "completed" and .conclusion == "success" and .workflowName == "ASF-Core CI")][0].databaseId // empty' <<<"$runs")
+            [[ -n "$run_id" ]] || { echo "BLOCK PR#$pr no exact-head successful ASF-Core CI run"; exit 1; }
+            artifact_count=$(gh api "repos/$repo/actions/runs/$run_id/artifacts" --jq --arg artifact "$BOOTSTRAP_ARTIFACT" '[.artifacts[] | select(.name == $artifact and .expired == false)] | length')
             [[ "$artifact_count" -gt 0 ]] || { echo "BLOCK PR#$pr exact run=$run_id has no test artifact"; exit 1; }
 
             current_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
