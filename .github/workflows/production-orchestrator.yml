@@ -75,10 +75,10 @@ jobs:
           declare -A HEADS
           HEADS[3]='943966fd19e1ee95a9e4c37d1f6cb6d44839e070'
           HEADS[5]='f0199d28fc758e8e2627cfc5ad8ffb1a62113dc4'
-          HEADS[4]='8cb62b33d4c367bf4ba6e9d102d2043212f6462c'
+          HEADS[7]='8cb62b33d4c367bf4ba6e9d102d2043212f6462c'
           HEADS[8]='fa5d9528e5c0647617d7ddd3c1c6bbe533b19e2b'
 
-          for pr in 3 5 4 8; do
+          for pr in 3 5 7 8; do
             json=$(gh api "repos/$repo/pulls/$pr")
             state=$(jq -r '.state' <<<"$json")
             merged=$(jq -r '.merged' <<<"$json")
