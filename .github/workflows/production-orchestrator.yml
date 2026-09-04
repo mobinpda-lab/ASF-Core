@@ -84,7 +84,7 @@ jobs:
           [[ "$count" -le "$max_candidates" ]] || { echo "BLOCK candidate overflow count=$count max=$max_candidates"; exit 1; }
           [[ "$count" != "0" ]] || { echo "NO_AUTHORIZED_CANDIDATE"; exit 0; }
 
-          for row in $(jq -c '.[]' <<<"$candidates"); do
+          while IFS= read -r row; do
             pr=$(jq -r '.number' <<<"$row")
             head=$(jq -r '.head.sha' <<<"$row")
             base_sha=$(jq -r '.base.sha' <<<"$row")
@@ -117,4 +117,4 @@ jobs:
             [[ "$new_main" == "$merge_commit" ]] || { echo "BLOCK PR#$pr main postcondition mismatch main=$new_main merge_commit=$merge_commit"; exit 1; }
             [[ "$new_main" != "$current_main" ]] || { echo "BLOCK PR#$pr main unchanged"; exit 1; }
             echo "PROMOTED PR#$pr merge_commit=$merge_commit new_main=$new_main"
-          done
+          done < <(jq -c '.[]' <<<"$candidates")
