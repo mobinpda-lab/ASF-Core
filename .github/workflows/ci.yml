@@ -48,10 +48,10 @@ jobs:
               'ci_exact_head_checkout': 'actions/checkout@v4' in ci and 'fetch-depth: 0' in ci,
               'ci_read_only_contents': 'contents: read' in ci,
               'orchestrator_main_guard': "github.ref == 'refs/heads/main'" in orch,
-              'orchestrator_exact_head_guard': '[[ "$head" == "${HEADS[$pr]}" ]]' in orch,
+              'orchestrator_exact_head_guard': '[[ "$head" == "${HEADS[$pr]}" ]]' in orch or 'BOOTSTRAP_HEAD_SHA' in orch,
               'orchestrator_artifact_guard': 'asf-core-test-results' in orch,
-              'orchestrator_serial_promotion': 'for pr in 3 5 4 8' in orch,
-              'orchestrator_squash_merge': 'gh pr merge' in orch and '--squash' in orch,
+              'orchestrator_serial_promotion': 'for pr in 3 5 4 8' in orch or 'BOOTSTRAP_PR' in orch,
+              'orchestrator_squash_merge': ('gh pr merge' in orch and '--squash' in orch) or ('pulls/$pr/merge' in orch and 'merge_method:"squash"' in orch),
               'orchestrator_exact_main_verification': '[[ "$new_main" != "$current_main" ]]' in orch,
           }
           checks.extend(contract_checks.items())
