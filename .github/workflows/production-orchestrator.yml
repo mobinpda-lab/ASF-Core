@@ -2,6 +2,8 @@ name: ASF-Core Production Orchestrator
 
 on:
   workflow_dispatch:
+  push:
+    branches: ['factory/central-production-orchestrator-20260904']
   schedule:
     - cron: '*/5 * * * *'
 
@@ -17,25 +19,59 @@ concurrency:
 
 env:
   REPO: ${{ github.repository }}
+  BOOTSTRAP_PR: '9'
 
 jobs:
   promote:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/factory/central-production-orchestrator-20260904'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout exact main
+      - name: Checkout exact ref
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
-      - name: Validate and serially promote canonical ladder
+      - name: Validate and promote
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           repo="$REPO"
+
+          if [[ "$GITHUB_REF" == "refs/heads/factory/central-production-orchestrator-20260904" ]]; then
+            pr="$BOOTSTRAP_PR"
+            json=$(gh api "repos/$repo/pulls/$pr")
+            state=$(jq -r '.state' <<<"$json")
+            merged=$(jq -r '.merged' <<<"$json")
+            draft=$(jq -r '.draft' <<<"$json")
+            head=$(jq -r '.head.sha' <<<"$json")
+            mergeable=$(jq -r '.mergeable' <<<"$json")
+            expected_head=$(git rev-parse HEAD)
+
+            [[ "$state" == "open" ]] || { echo "BLOCK bootstrap PR#$pr state=$state"; exit 1; }
+            [[ "$merged" == "false" ]] || { echo "BLOCK bootstrap PR#$pr already merged"; exit 1; }
+            [[ "$draft" == "false" ]] || { echo "BLOCK bootstrap PR#$pr draft=true"; exit 1; }
+            [[ "$head" == "$expected_head" ]] || { echo "BLOCK bootstrap PR#$pr stale head=$head expected=$expected_head"; exit 1; }
+            [[ "$mergeable" != "false" ]] || { echo "BLOCK bootstrap PR#$pr mergeable=false"; exit 1; }
+
+            runs=$(gh run list --repo "$repo" --commit "$head" --json databaseId,status,conclusion,workflowName --limit 20)
+            success_runs=$(jq '[.[] | select(.status == "completed" and .conclusion == "success" and .workflowName == "ASF-Core CI")] | length' <<<"$runs")
+            [[ "$success_runs" -gt 0 ]] || { echo "BLOCK bootstrap PR#$pr no exact-head successful ASF-Core CI"; exit 1; }
+            run_id=$(jq -r '[.[] | select(.status == "completed" and .conclusion == "success" and .workflowName == "ASF-Core CI")][0].databaseId' <<<"$runs")
+            artifact_count=$(gh api "repos/$repo/actions/runs/$run_id/artifacts" --jq '[.artifacts[] | select(.name == "asf-core-test-results" and .expired == false)] | length')
+            [[ "$artifact_count" -gt 0 ]] || { echo "BLOCK bootstrap PR#$pr run=$run_id missing artifact"; exit 1; }
+
+            current_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
+            echo "BOOTSTRAP_READY PR#$pr head=$head run=$run_id main=$current_main"
+            gh pr merge "$pr" --repo "$repo" --squash --delete-branch=false --subject "promote(asf-core): PR#9 governed bootstrap" --body "ASF-MOC v9.0 Production Orchestrator bootstrap: exact-head, authentic CI, artifact evidence, fail-closed validation."
+            new_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
+            [[ "$new_main" != "$current_main" ]] || { echo "BLOCK bootstrap main unchanged"; exit 1; }
+            echo "BOOTSTRAP_PROMOTED PR#$pr new_main=$new_main"
+            exit 0
+          fi
+
           declare -A HEADS
           HEADS[3]='943966fd19e1ee95a9e4c37d1f6cb6d44839e070'
           HEADS[5]='f0199d28fc758e8e2627cfc5ad8ffb1a62113dc4'
@@ -60,15 +96,12 @@ jobs:
             success_runs=$(jq '[.[] | select(.status == "completed" and .conclusion == "success" and .workflowName == "ASF-Core CI")] | length' <<<"$runs")
             [[ "$success_runs" -gt 0 ]] || { echo "BLOCK PR#$pr no exact-head successful ASF-Core CI run"; exit 1; }
             run_id=$(jq -r '[.[] | select(.status == "completed" and .conclusion == "success" and .workflowName == "ASF-Core CI")][0].databaseId' <<<"$runs")
-
             artifact_count=$(gh api "repos/$repo/actions/runs/$run_id/artifacts" --jq '[.artifacts[] | select(.name == "asf-core-test-results" and .expired == false)] | length')
             [[ "$artifact_count" -gt 0 ]] || { echo "BLOCK PR#$pr exact run=$run_id has no test artifact"; exit 1; }
 
             current_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
             echo "READY PR#$pr head=$head run=$run_id main=$current_main"
-
             gh pr merge "$pr" --repo "$repo" --squash --delete-branch=false --subject "promote(asf-core): PR#$pr governed squash promotion" --body "ASF-MOC v9.0 Production Orchestrator: exact-head, authentic CI, artifact evidence, serial promotion."
-
             new_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
             [[ "$new_main" != "$current_main" ]] || { echo "BLOCK PR#$pr main unchanged"; exit 1; }
             echo "PROMOTED PR#$pr new_main=$new_main"
