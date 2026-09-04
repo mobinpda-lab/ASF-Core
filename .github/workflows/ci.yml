@@ -1,0 +1,36 @@
+name: ASF-Core CI
+
+on:
+  push:
+    branches: [main, 'factory/**']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest
+      - name: Run ASF-Core tests
+        env:
+          PYTHONPATH: .
+        run: python -m pytest tests/unit-tests tests/integration-tests -v --junitxml=test-results.xml
+      - name: Upload authentic test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asf-core-test-results
+          path: test-results.xml
+          if-no-files-found: error
