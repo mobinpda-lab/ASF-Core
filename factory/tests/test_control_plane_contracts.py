@@ -48,4 +48,6 @@ def test_evidence_requires_identity_and_confidence():
 def test_recovery_is_bounded():
     policy = RecoveryPolicy()
     assert policy.decision(0, True) == "REQUEUE"
-    assert policy.decision(2, True) == "ESCALATE"
+    assert policy.decision(2, True) == "REQUEUE"
+    assert policy.decision(3, True) == "ESCALATE"
+    assert policy.decision(1, False) == "ESCALATE"
