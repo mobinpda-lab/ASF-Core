@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Validate ASF completion metrics against the machine-readable threshold contract.
-
-Input: JSON metrics file passed as argv[1]. Missing metrics are BLOCK, never pass.
-The script intentionally does not invent metrics or treat absent data as zero.
-"""
+"""Fail-closed validation for ASF completion thresholds and runtime metrics."""
 from __future__ import annotations
 
 import json
@@ -40,19 +36,37 @@ def maximum(metrics: dict, key: str, maximum_value: float) -> None:
         fail(f"{key}: value={value} > maximum={maximum_value}")
 
 
-def main() -> int:
-    if len(sys.argv) != 2:
-        fail("usage: validate_completion_thresholds.py METRICS.json")
-
+def load_contract() -> dict:
     try:
         contract = json.loads(CONTRACT.read_text())
-        metrics = json.loads(Path(sys.argv[1]).read_text())
     except (OSError, json.JSONDecodeError) as exc:
-        fail(f"invalid contract or metrics JSON: {exc}")
-
+        fail(f"invalid threshold contract: {exc}")
     if contract.get("version") != "1.0.0":
         fail("unsupported threshold contract version")
+    return contract
 
+
+def validate_contract_shape(contract: dict) -> None:
+    required_sections = {"critical", "factory", "evidence", "products", "ncm_control_plane", "completion"}
+    if set(contract) != {"version", *required_sections}:
+        fail("threshold contract has unexpected/missing top-level sections")
+    for section, rules in contract.items():
+        if section == "version":
+            continue
+        if not isinstance(rules, dict) or not rules:
+            fail(f"empty threshold section: {section}")
+        for key, rule in rules.items():
+            if not isinstance(rule, dict):
+                fail(f"invalid rule: {section}.{key}")
+            if "min" not in rule and "max" not in rule and "min_count" not in rule:
+                fail(f"rule has no bound: {section}.{key}")
+            if "min" in rule and "max" in rule and rule["min"] > rule["max"]:
+                fail(f"contradictory bounds: {section}.{key}")
+            if "sample_min" in rule and rule["sample_min"] < 1:
+                fail(f"invalid sample_min: {section}.{key}")
+
+
+def validate_metrics(metrics: dict, contract: dict) -> None:
     critical = contract["critical"]
     factory = contract["factory"]
     evidence = contract["evidence"]
@@ -60,11 +74,8 @@ def main() -> int:
     ncm = contract["ncm_control_plane"]
     completion = contract["completion"]
 
-    maximum(metrics, "governance_violations", critical["governance_violations"]["max"])
-    maximum(metrics, "manual_merges", critical["manual_merges"]["max"])
-    maximum(metrics, "direct_main_writes", critical["direct_main_writes"]["max"])
-    maximum(metrics, "force_pushes", critical["force_pushes"]["max"])
-    maximum(metrics, "unknown_promotions", critical["unknown_promotions"]["max"])
+    for key in ("governance_violations", "manual_merges", "direct_main_writes", "force_pushes", "unknown_promotions"):
+        maximum(metrics, key, critical[key]["max"])
     rate(metrics, "exact_sha_match_rate", critical["exact_sha_match_rate"]["min"], critical["exact_sha_match_rate"]["sample_min"])
     rate(metrics, "promotion_success_rate", critical["promotion_success_rate"]["min"], critical["promotion_success_rate"]["sample_min"])
 
@@ -72,8 +83,6 @@ def main() -> int:
     rate(metrics, "dependency_coverage", factory["dependency_coverage"]["min"], 1)
     maximum(metrics, "duplicate_active_tasks", factory["duplicate_active_tasks"]["max"])
     maximum(metrics, "duplicate_worker_leases", factory["duplicate_worker_leases"]["max"])
-    if require(metrics, "parallel_waves") < factory["parallel_waves"]["min"]:
-        fail("parallel_waves below minimum")
     waves = require(metrics, "wave_widths")
     if len(waves) < factory["parallel_waves"]["min"] or any(w < factory["min_parallel_tasks_per_wave"]["min"] for w in waves[-factory["parallel_waves"]["min"]:]):
         fail("parallel wave evidence does not meet width/count threshold")
@@ -82,6 +91,7 @@ def main() -> int:
     rate(metrics, "recovery_success_rate", factory["recovery_success_rate"]["min"], factory["recovery_success_rate"]["sample_min"])
     maximum(metrics, "queue_refill_p95_seconds", factory["queue_refill_p95_seconds"]["max"])
     maximum(metrics, "recovery_p95_seconds", factory["recovery_p95_seconds"]["max"])
+    maximum(metrics, "parallel_speed_ratio", factory["parallel_speed_ratio"]["max"])
 
     rate(metrics, "evidence_completeness_rate", evidence["evidence_completeness_rate"]["min"], evidence["evidence_completeness_rate"]["sample_min"])
     maximum(metrics, "evidence_freshness_p95_seconds", evidence["evidence_freshness_p95_seconds"]["max"])
@@ -105,6 +115,20 @@ def main() -> int:
     for key, rule in completion.items():
         maximum(metrics, key, rule["max"])
 
+
+def main() -> int:
+    contract = load_contract()
+    validate_contract_shape(contract)
+    if len(sys.argv) == 2 and sys.argv[1] == "--contract-only":
+        print("PASS: completion threshold contract is valid")
+        return 0
+    if len(sys.argv) != 2:
+        fail("usage: validate_completion_thresholds.py --contract-only | METRICS.json")
+    try:
+        metrics = json.loads(Path(sys.argv[1]).read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        fail(f"invalid metrics JSON: {exc}")
+    validate_metrics(metrics, contract)
     print("PASS: operational completion thresholds satisfied")
     return 0
 
