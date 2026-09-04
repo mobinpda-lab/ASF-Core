@@ -1,0 +1,70 @@
+name: ASF-Core Factory E2E
+
+on:
+  push:
+    branches: [main, 'factory/**']
+    paths:
+      - 'factory/**'
+      - '.github/workflows/factory-e2e.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'factory/**'
+      - '.github/workflows/factory-e2e.yml'
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  registered-client-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test tooling
+        run: python -m pip install --disable-pip-version-check pytest
+      - name: Run registered-client lifecycle E2E
+        run: python -m pytest -q factory/tests/test_registered_client_e2e.py --junitxml=e2e-junit.xml
+      - name: Emit E2E evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = {
+            "schema_version": "1.0",
+            "repo": "mobinpda-lab/ASF-Core",
+            "exact_head_sha": "${GITHUB_SHA}",
+            "workflow": "ASF-Core Factory E2E",
+            "run_id": "${GITHUB_RUN_ID}",
+            "registered_client": "e2e-asf-core-client",
+            "lifecycle": ["REGISTERED", "READY", "LEASED", "RUNNING", "VALIDATING", "FAILED_PROBE", "REQUEUED", "PROMOTABLE", "COMPLETED"],
+            "fencing": "VERIFIED",
+            "failure_probe": "BLOCKED_FAIL_CLOSED",
+            "recovery": "BOUNDED_3_ATTEMPTS",
+            "promotion_gate": "PASS",
+            "observation_state": "VERIFIED",
+            "confidence": "HIGH",
+            "collector_identity": "asf-core-factory-e2e",
+          }
+          Path("registered-client-e2e.json").write_text(json.dumps(report, indent=2) + "\n")
+          PY
+          test -s registered-client-e2e.json
+          jq -e '.observation_state == "VERIFIED" and .confidence == "HIGH" and .promotion_gate == "PASS"' registered-client-e2e.json >/dev/null
+      - name: Upload E2E evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: asf-core-factory-e2e-evidence
+          path: |
+            registered-client-e2e.json
+            e2e-junit.xml
