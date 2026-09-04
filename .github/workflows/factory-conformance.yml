@@ -1,0 +1,62 @@
+name: ASF-Core Factory Conformance
+
+on:
+  push:
+    branches: [main, 'factory/**']
+    paths:
+      - 'factory/**'
+      - 'docs/architecture/**'
+      - '.github/workflows/factory-conformance.yml'
+      - '.github/workflows/production-orchestrator.yml'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'factory/**'
+      - 'docs/architecture/**'
+      - '.github/workflows/factory-conformance.yml'
+      - '.github/workflows/production-orchestrator.yml'
+      - '.github/workflows/ci.yml'
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test tooling
+        run: python -m pip install --disable-pip-version-check pytest
+      - name: Run factory contract tests
+        run: python -m pytest -q factory/tests
+      - name: Fail closed on missing canonical surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            factory/contracts/schema.py
+            factory/runtime/state_machine.py
+            factory/gates/engine.py
+            factory/recovery/policy.py
+            factory/adapters/generic.py
+            factory/registry/projects.example.yaml
+            factory/registry/promotion-policy.json
+          )
+          for path in "${required[@]}"; do
+            test -f "$path" || { echo "MISSING_CANONICAL_SURFACE=$path"; exit 1; }
+          done
+          jq -e '.schema_version == "1.0" and .promotion.enabled == true and (.promotion.max_candidates_per_cycle >= 1)' factory/registry/promotion-policy.json >/dev/null
+          grep -q 'L10' README.md || {
+            echo 'L10 status must remain explicit until authentic E2E evidence exists'; exit 1;
+          }

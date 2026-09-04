@@ -1,0 +1,4 @@
+# Example only. Real projects must be explicitly registered and validated.
+# This file intentionally contains no product source code.
+schema_version: "1.0"
+projects: []

@@ -3,7 +3,7 @@ name: ASF-Core Production Orchestrator
 on:
   workflow_dispatch:
   push:
-    branches: ['factory/bind-pr12-orchestrator-20260904', 'main']
+    branches: ['factory/independent-control-plane-hardening-20260904', 'main']
   schedule:
     - cron: '*/5 * * * *'
 
@@ -19,14 +19,11 @@ concurrency:
 
 env:
   REPO: ${{ github.repository }}
-  BOOTSTRAP_PR: '13'
-  BOOTSTRAP_HEAD_SHA: ''
-  BOOTSTRAP_BASE_SHA: '692dd65501e93f39c7b1dcf25651fb9a61c566f3'
-  BOOTSTRAP_ARTIFACT: 'asf-core-test-results'
+  POLICY: factory/registry/promotion-policy.json
 
 jobs:
   promote:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/factory/bind-pr12-orchestrator-20260904'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/factory/independent-control-plane-hardening-20260904'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact ref
@@ -35,109 +32,63 @@ jobs:
           ref: ${{ github.ref_name }}
           fetch-depth: 0
 
-      - name: Validate and promote
+      - name: Discover and promote registry-authorized candidates
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           repo="$REPO"
+          policy="$POLICY"
+          test -f "$policy" || { echo "BLOCK registry policy missing"; exit 1; }
 
-          if [[ "$GITHUB_REF" == "refs/heads/factory/bind-pr12-orchestrator-20260904" ]]; then
-            pr="$BOOTSTRAP_PR"
-            json=$(gh api "repos/$repo/pulls/$pr")
-            state=$(jq -r '.state' <<<"$json")
-            merged=$(jq -r '.merged' <<<"$json")
-            draft=$(jq -r '.draft' <<<"$json")
-            head=$(jq -r '.head.sha' <<<"$json")
-            base_sha=$(jq -r '.base.sha' <<<"$json")
-            mergeable=$(jq -r '.mergeable' <<<"$json")
+          enabled=$(jq -r '.promotion.enabled' "$policy")
+          required_label=$(jq -r '.promotion.required_label' "$policy")
+          head_prefix=$(jq -r '.promotion.head_branch_prefix' "$policy")
+          required_workflow=$(jq -r '.promotion.required_workflow' "$policy")
+          required_artifact=$(jq -r '.promotion.required_artifact' "$policy")
+          max_candidates=$(jq -r '.promotion.max_candidates_per_cycle' "$policy")
+          [[ "$enabled" == "true" ]] || { echo "PROMOTION_DISABLED"; exit 0; }
+          [[ "$required_label" != "null" && "$head_prefix" != "null" && "$required_workflow" != "null" && "$required_artifact" != "null" ]] || { echo "BLOCK invalid registry policy"; exit 1; }
 
-            [[ "$state" == "open" ]] || { echo "BLOCK bootstrap PR#$pr state=$state"; exit 1; }
-            [[ "$merged" == "false" ]] || { echo "BLOCK bootstrap PR#$pr already merged"; exit 1; }
-            [[ "$draft" == "false" ]] || { echo "BLOCK bootstrap PR#$pr draft=true"; exit 1; }
-            if [[ -n "$BOOTSTRAP_HEAD_SHA" ]]; then
-              [[ "$head" == "$BOOTSTRAP_HEAD_SHA" ]] || { echo "BLOCK bootstrap PR#$pr HEAD_DRIFT head=$head expected=$BOOTSTRAP_HEAD_SHA"; exit 1; }
-            fi
-            [[ "$base_sha" == "$BOOTSTRAP_BASE_SHA" ]] || { echo "BLOCK bootstrap PR#$pr BASE_DRIFT base=$base_sha expected=$BOOTSTRAP_BASE_SHA"; exit 1; }
-            [[ "$mergeable" != "false" ]] || { echo "BLOCK bootstrap PR#$pr mergeable=false"; exit 1; }
+          prs=$(gh api --paginate "repos/$repo/pulls?state=open&base=main&per_page=100" | jq -s 'add')
+          candidates=$(jq -c --arg label "$required_label" --arg prefix "$head_prefix" '[.[] | select(.draft == false and .mergeable != false and (.labels | map(.name) | index($label))) | select(.head.ref | startswith($prefix))] | sort_by(.number)' <<<"$prs")
+          count=$(jq 'length' <<<"$candidates")
+          echo "DISCOVERY candidates=$count label=$required_label prefix=$head_prefix"
+          [[ "$count" -le "$max_candidates" ]] || { echo "BLOCK candidate overflow count=$count max=$max_candidates"; exit 1; }
+          [[ "$count" != "0" ]] || { echo "NO_AUTHORIZED_CANDIDATE"; exit 0; }
 
-            runs=$(gh run list --repo "$repo" --commit "$head" --json databaseId,status,conclusion,workflowName,headSha --limit 20)
-            run_id=$(jq -r --arg sha "$head" '[.[] | select(.headSha == $sha and .status == "completed" and .conclusion == "success" and .workflowName == "ASF-Core CI")][0].databaseId // empty' <<<"$runs")
-            [[ -n "$run_id" ]] || { echo "BLOCK bootstrap PR#$pr no exact-head successful ASF-Core CI"; exit 1; }
+          for row in $(jq -c '.[]' <<<"$candidates"); do
+            pr=$(jq -r '.number' <<<"$row")
+            head=$(jq -r '.head.sha' <<<"$row")
+            base_sha=$(jq -r '.base.sha' <<<"$row")
+            current_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
+            [[ "$base_sha" == "$current_main" ]] || { echo "BLOCK PR#$pr BASE_DRIFT base=$base_sha main=$current_main"; exit 1; }
+
+            runs=$(gh run list --repo "$repo" --commit "$head" --json databaseId,status,conclusion,workflowName,headSha --limit 50)
+            run_id=$(jq -r --arg sha "$head" --arg wf "$required_workflow" '[.[] | select(.headSha == $sha and .status == "completed" and .conclusion == "success" and .workflowName == $wf)][0].databaseId // empty' <<<"$runs")
+            [[ -n "$run_id" ]] || { echo "BLOCK PR#$pr no exact-head successful workflow=$required_workflow"; exit 1; }
 
             artifact_json=$(gh api "repos/$repo/actions/runs/$run_id/artifacts")
-            artifact_count=$(jq --arg artifact "$BOOTSTRAP_ARTIFACT" '[.artifacts[] | select(.name == $artifact and .expired == false)] | length' <<<"$artifact_json")
-            [[ "$artifact_count" -gt 0 ]] || { echo "BLOCK bootstrap PR#$pr run=$run_id missing artifact=$BOOTSTRAP_ARTIFACT"; exit 1; }
+            artifact_count=$(jq --arg artifact "$required_artifact" '[.artifacts[] | select(.name == $artifact and .expired == false)] | length' <<<"$artifact_json")
+            [[ "$artifact_count" -gt 0 ]] || { echo "BLOCK PR#$pr run=$run_id missing artifact=$required_artifact"; exit 1; }
 
-            current_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
-            [[ "$current_main" == "$BOOTSTRAP_BASE_SHA" ]] || { echo "BLOCK bootstrap main HEAD_DRIFT main=$current_main expected=$BOOTSTRAP_BASE_SHA"; exit 1; }
-            echo "BOOTSTRAP_READY PR#$pr head=$head base=$base_sha run=$run_id artifact=$BOOTSTRAP_ARTIFACT main=$current_main"
+            pr_now=$(gh api "repos/$repo/pulls/$pr")
+            [[ "$(jq -r '.state' <<<"$pr_now")" == "open" ]] || { echo "BLOCK PR#$pr state changed"; exit 1; }
+            [[ "$(jq -r '.merged' <<<"$pr_now")" == "false" ]] || { echo "BLOCK PR#$pr already merged"; exit 1; }
+            [[ "$(jq -r '.head.sha' <<<"$pr_now")" == "$head" ]] || { echo "BLOCK PR#$pr HEAD_DRIFT during validation"; exit 1; }
 
-            merge_payload=$(jq -n --arg sha "$head" --arg title "promote(asf-core): PR#13 governed orchestrator activation" --arg message "ASF-MOC v9.0 Production Orchestrator: PR#13 authorized to activate the factory orchestrator; exact-head, exact-base, authentic CI artifact, and fail-closed validation." '{sha:$sha,merge_method:"squash",commit_title:$title,commit_message:$message}')
-            merge_response=$(curl --fail-with-body -sS -X PUT \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              -H "Content-Type: application/json" \
-              "https://api.github.com/repos/$repo/pulls/$pr/merge" \
-              -d "$merge_payload")
-            merge_result=$(jq -r '.merged // false' <<<"$merge_response")
-            [[ "$merge_result" == "true" ]] || { echo "BLOCK bootstrap PR#$pr merge API did not confirm merged=true response=$merge_response"; exit 1; }
+            echo "READY PR#$pr head=$head base=$base_sha run=$run_id artifact=$required_artifact main=$current_main"
+            payload=$(jq -n --arg sha "$head" --arg title "promote(asf-core): PR#$pr registry-authorized promotion" --arg message "ASF-MOC v9.0 registry-authorized promotion: exact HEAD/base, authentic CI, artifact evidence, fail-closed validation." '{sha:$sha,merge_method:"squash",commit_title:$title,commit_message:$message}')
+            response=$(curl --fail-with-body -sS -X PUT -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $GH_TOKEN" -H "X-GitHub-Api-Version: 2022-11-28" -H "Content-Type: application/json" "https://api.github.com/repos/$repo/pulls/$pr/merge" -d "$payload")
+            [[ "$(jq -r '.merged // false' <<<"$response")" == "true" ]] || { echo "BLOCK PR#$pr merge API did not confirm merged=true"; exit 1; }
 
             merged_json=$(gh api "repos/$repo/pulls/$pr")
-            merged=$(jq -r '.merged' <<<"$merged_json")
+            [[ "$(jq -r '.merged' <<<"$merged_json")" == "true" ]] || { echo "BLOCK PR#$pr post-merge confirmation failed"; exit 1; }
             merge_commit=$(jq -r '.merge_commit_sha' <<<"$merged_json")
-            [[ "$merged" == "true" ]] || { echo "BLOCK bootstrap PR#$pr merge not confirmed"; exit 1; }
-            [[ -n "$merge_commit" && "$merge_commit" != "null" ]] || { echo "BLOCK bootstrap PR#$pr missing merge_commit_sha"; exit 1; }
-
+            [[ -n "$merge_commit" && "$merge_commit" != "null" ]] || { echo "BLOCK PR#$pr missing merge_commit_sha"; exit 1; }
             new_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
-            [[ "$new_main" == "$merge_commit" ]] || { echo "BLOCK bootstrap main postcondition mismatch main=$new_main merge_commit=$merge_commit"; exit 1; }
-            [[ "$new_main" != "$current_main" ]] || { echo "BLOCK bootstrap main unchanged"; exit 1; }
-            echo "BOOTSTRAP_PROMOTED PR#$pr merge_commit=$merge_commit new_main=$new_main"
-            exit 0
-          fi
-
-          declare -A HEADS
-          HEADS[3]='943966fd19e1ee95a9e4c37d1f6cb6d44839e070'
-          HEADS[5]='f0199d28fc758e8e2627cfc5ad8ffb1a62113dc4'
-          HEADS[4]='8cb62b33d4c367bf4ba6e9d102d2043212f6462c'
-          HEADS[8]='fa5d9528e5c0647617d7ddd3c1c6bbe533b19e2b'
-
-          for pr in 3 5 4 8; do
-            json=$(gh api "repos/$repo/pulls/$pr")
-            state=$(jq -r '.state' <<<"$json")
-            merged=$(jq -r '.merged' <<<"$json")
-            draft=$(jq -r '.draft' <<<"$json")
-            head=$(jq -r '.head.sha' <<<"$json")
-            mergeable=$(jq -r '.mergeable' <<<"$json")
-
-            [[ "$state" == "open" ]] || { echo "BLOCK PR#$pr state=$state"; exit 1; }
-            [[ "$merged" == "false" ]] || { echo "BLOCK PR#$pr already merged"; exit 1; }
-            [[ "$draft" == "false" ]] || { echo "BLOCK PR#$pr draft=true"; exit 1; }
-            [[ "$head" == "${HEADS[$pr]}" ]] || { echo "BLOCK PR#$pr stale head=$head expected=${HEADS[$pr]}"; exit 1; }
-            [[ "$mergeable" != "false" ]] || { echo "BLOCK PR#$pr mergeable=false"; exit 1; }
-
-            runs=$(gh run list --repo "$repo" --commit "$head" --json databaseId,status,conclusion,workflowName,headSha --limit 20)
-            run_id=$(jq -r --arg sha "$head" '[.[] | select(.headSha == $sha and .status == "completed" and .conclusion == "success" and .workflowName == "ASF-Core CI")][0].databaseId // empty' <<<"$runs")
-            [[ -n "$run_id" ]] || { echo "BLOCK PR#$pr no exact-head successful ASF-Core CI run"; exit 1; }
-            artifact_json=$(gh api "repos/$repo/actions/runs/$run_id/artifacts")
-            artifact_count=$(jq --arg artifact "$BOOTSTRAP_ARTIFACT" '[.artifacts[] | select(.name == $artifact and .expired == false)] | length' <<<"$artifact_json")
-            [[ "$artifact_count" -gt 0 ]] || { echo "BLOCK PR#$pr exact run=$run_id has no test artifact"; exit 1; }
-
-            current_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
-            echo "READY PR#$pr head=$head run=$run_id main=$current_main"
-            merge_payload=$(jq -n --arg sha "$head" --arg title "promote(asf-core): PR#$pr governed squash promotion" --arg message "ASF-MOC v9.0 Production Orchestrator: exact-head, authentic CI, artifact evidence, serial promotion." '{sha:$sha,merge_method:"squash",commit_title:$title,commit_message:$message}')
-            merge_response=$(curl --fail-with-body -sS -X PUT \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              -H "Content-Type: application/json" \
-              "https://api.github.com/repos/$repo/pulls/$pr/merge" \
-              -d "$merge_payload")
-            merge_result=$(jq -r '.merged // false' <<<"$merge_response")
-            [[ "$merge_result" == "true" ]] || { echo "BLOCK PR#$pr merge API did not confirm merged=true response=$merge_response"; exit 1; }
-            new_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
+            [[ "$new_main" == "$merge_commit" ]] || { echo "BLOCK PR#$pr main postcondition mismatch main=$new_main merge_commit=$merge_commit"; exit 1; }
             [[ "$new_main" != "$current_main" ]] || { echo "BLOCK PR#$pr main unchanged"; exit 1; }
-            echo "PROMOTED PR#$pr new_main=$new_main"
+            echo "PROMOTED PR#$pr merge_commit=$merge_commit new_main=$new_main"
           done
