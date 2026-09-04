@@ -119,3 +119,5 @@ jobs:
             [[ "$new_main" != "$current_main" ]] || { echo "BLOCK PR#$pr main unchanged"; exit 1; }
             echo "PROMOTED PR#$pr new_main=$new_main"
           done
+
+# Trigger-only touch: preserve governed promotion logic while ensuring a new push event wakes the orchestrator.
