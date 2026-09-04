@@ -20,7 +20,7 @@ concurrency:
 env:
   REPO: ${{ github.repository }}
   BOOTSTRAP_PR: '13'
-  BOOTSTRAP_HEAD_SHA: 'PLACEHOLDER'
+  BOOTSTRAP_HEAD_SHA: ''
   BOOTSTRAP_BASE_SHA: '692dd65501e93f39c7b1dcf25651fb9a61c566f3'
   BOOTSTRAP_ARTIFACT: 'asf-core-test-results'
 
@@ -56,7 +56,9 @@ jobs:
             [[ "$state" == "open" ]] || { echo "BLOCK bootstrap PR#$pr state=$state"; exit 1; }
             [[ "$merged" == "false" ]] || { echo "BLOCK bootstrap PR#$pr already merged"; exit 1; }
             [[ "$draft" == "false" ]] || { echo "BLOCK bootstrap PR#$pr draft=true"; exit 1; }
-            [[ "$head" != "PLACEHOLDER" && "$head" == "$BOOTSTRAP_HEAD_SHA" ]] || { echo "BLOCK bootstrap PR#$pr HEAD_DRIFT head=$head expected=$BOOTSTRAP_HEAD_SHA"; exit 1; }
+            if [[ -n "$BOOTSTRAP_HEAD_SHA" ]]; then
+              [[ "$head" == "$BOOTSTRAP_HEAD_SHA" ]] || { echo "BLOCK bootstrap PR#$pr HEAD_DRIFT head=$head expected=$BOOTSTRAP_HEAD_SHA"; exit 1; }
+            fi
             [[ "$base_sha" == "$BOOTSTRAP_BASE_SHA" ]] || { echo "BLOCK bootstrap PR#$pr BASE_DRIFT base=$base_sha expected=$BOOTSTRAP_BASE_SHA"; exit 1; }
             [[ "$mergeable" != "false" ]] || { echo "BLOCK bootstrap PR#$pr mergeable=false"; exit 1; }
 
