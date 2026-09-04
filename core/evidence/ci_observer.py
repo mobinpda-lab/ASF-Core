@@ -47,14 +47,21 @@ class EvidenceObserver:
         elif any(name not in source for name in sections):
             provider_state = ObservationState.PARTIAL
         state = self._classify(values)
-        if provider_state is not ObservationState.AVAILABLE:
-            state = Visibility.NOT_EXPOSED if provider_state in {ObservationState.UNAVAILABLE, ObservationState.INCONSISTENT} else Visibility.PENDING
+        if provider_state is ObservationState.INCONSISTENT:
+            state = Visibility.NOT_EXPOSED
+        elif provider_state is ObservationState.DELAYED:
+            state = Visibility.PENDING
         return EvidenceRecord(repository, commit_sha, *(values[name] for name in sections), state, provider_state, "HIGH" if provider_state is ObservationState.AVAILABLE else "LOW", provider_state.value.lower())
 
     def observe_provider(self, repository: str, commit_sha: str, observation: ProviderObservation) -> EvidenceRecord:
         self._validate_sha(commit_sha)
         if observation.observation is not ObservationState.AVAILABLE:
-            state = Visibility.NOT_EXPOSED if observation.observation in {ObservationState.UNAVAILABLE, ObservationState.INCONSISTENT, ObservationState.PARTIAL} else Visibility.PENDING
+            state = Visibility.NOT_EXPOSED if observation.observation in {ObservationState.UNAVAILABLE, ObservationState.INCONSISTENT} else Visibility.PENDING
+            if observation.observation is ObservationState.PARTIAL:
+                values = {name: tuple(observation.data.get(name) or ()) for name in ("workflow_runs", "check_runs", "jobs", "artifacts", "statuses")}
+                self._reject_mismatch(repository, commit_sha, values.values())
+                state = self._classify(values)
+                return self._record(repository, commit_sha, values, state, observation.observation, observation.confidence, observation.reason)
             return self._record(repository, commit_sha, observation.data, state, observation.observation, observation.confidence, observation.reason)
         values = {name: tuple(observation.data.get(name) or ()) for name in ("workflow_runs", "check_runs", "jobs", "artifacts", "statuses")}
         self._reject_mismatch(repository, commit_sha, values.values())
