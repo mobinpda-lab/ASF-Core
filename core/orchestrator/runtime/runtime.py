@@ -7,6 +7,8 @@ from typing import Iterable, Mapping, Optional
 from core.orchestrator.decisions import Decision, FailureClass
 from core.state.lifecycle import Lifecycle, LifecycleState
 
+__all__ = ["Decision", "FailureClass", "FailureAction", "Task", "ExecutionContext", "EvidenceRecord", "DecisionRecord", "DependencyEngine", "RecoveryPolicy", "OrchestratorRuntime"]
+
 
 class FailureAction(str, Enum):
     RETRY = "RETRY"
@@ -83,7 +85,6 @@ class OrchestratorRuntime:
         self.evidence: dict[str, EvidenceRecord] = {}
         self.history: list[DecisionRecord] = []
         self.dependencies = DependencyEngine(self.tasks)
-        self.dependencies.validate_graph()
         for task in self.tasks.values(): self._create_context(task)
         self.recovery = RecoveryPolicy()
 

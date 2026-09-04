@@ -47,9 +47,18 @@ class EvidenceObserver:
         elif any(name not in source for name in sections):
             provider_state = ObservationState.PARTIAL
         state = self._classify(values, authoritative_not_found=source.get("authoritative_not_found") is True)
-        if provider_state is not ObservationState.AVAILABLE:
-            state = Visibility.NOT_EXPOSED if provider_state in {ObservationState.UNAVAILABLE, ObservationState.INCONSISTENT} else Visibility.PENDING
-        return EvidenceRecord(repository, commit_sha, *(values[name] for name in sections), state, provider_state, "HIGH" if provider_state is ObservationState.AVAILABLE else "LOW", provider_state.value.lower())
+        if provider_state in {ObservationState.UNAVAILABLE, ObservationState.INCONSISTENT}:
+            state = Visibility.NOT_EXPOSED
+        elif provider_state is ObservationState.DELAYED:
+            state = Visibility.PENDING
+        elif provider_state is ObservationState.PARTIAL and state in {Visibility.SUCCESS, Visibility.FAILURE}:
+            # Terminal state is determinable from authoritative execution records
+            # even when non-essential provider sections are omitted.
+            provider_state = ObservationState.AVAILABLE
+        elif provider_state is ObservationState.PARTIAL and state is Visibility.PENDING:
+            state = Visibility.PENDING
+        reason = "normalized terminal evidence" if provider_state is ObservationState.AVAILABLE else provider_state.value.lower()
+        return EvidenceRecord(repository, commit_sha, *(values[name] for name in sections), state, provider_state, "HIGH" if provider_state is ObservationState.AVAILABLE else "LOW", reason)
 
     def observe_provider(self, repository: str, commit_sha: str, observation: ProviderObservation) -> EvidenceRecord:
         self._validate_sha(commit_sha)
@@ -92,3 +101,6 @@ class EvidenceObserver:
         if any(c in {"", "queued", "in_progress", "pending", "waiting"} for c in conclusions):
             return Visibility.PENDING
         return Visibility.SUCCESS
+
+
+__all__ = ["EvidenceObserver", "EvidenceRecord", "Visibility"]

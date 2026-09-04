@@ -25,3 +25,6 @@ def promotion_matrix(record: EvidenceRecord, required_artifacts: bool = False) -
     if required_artifacts and not record.artifacts:
         gates.append(PromotionGate("artifacts", Visibility.NOT_FOUND, "required artifacts absent", "LOW", "BLOCK"))
     return tuple(gates)
+
+
+__all__ = ["PromotionGate", "promotion_matrix"]
