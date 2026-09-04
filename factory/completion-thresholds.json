@@ -20,7 +20,8 @@
     "task_completion_rate": {"min": 0.95, "sample_min": 20},
     "recovery_success_rate": {"min": 0.90, "sample_min": 10},
     "queue_refill_p95_seconds": {"max": 300},
-    "recovery_p95_seconds": {"max": 900}
+    "recovery_p95_seconds": {"max": 900},
+    "parallel_speed_ratio": {"max": 0.60, "sample_min": 3}
   },
   "evidence": {
     "evidence_completeness_rate": {"min": 1.0, "sample_min": 1},
