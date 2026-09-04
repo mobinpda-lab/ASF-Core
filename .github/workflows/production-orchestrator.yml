@@ -71,11 +71,12 @@ jobs:
             [[ "$current_main" == "$BOOTSTRAP_BASE_SHA" ]] || { echo "BLOCK bootstrap main HEAD_DRIFT main=$current_main expected=$BOOTSTRAP_BASE_SHA"; exit 1; }
             echo "BOOTSTRAP_READY PR#$pr head=$head base=$base_sha run=$run_id artifact=$BOOTSTRAP_ARTIFACT main=$current_main"
 
-            gh api --method PUT "repos/$repo/pulls/$pr/merge" \
+            gh api --method PUT \
               -f merge_method=squash \
               -f sha="$head" \
               -f commit_title="promote(asf-core): PR#12 governed bootstrap" \
-              -f commit_message="ASF-MOC v9.0 Production Orchestrator: PR#12 explicitly authorized as architectural bootstrap target; exact-head, exact-base, authentic CI artifact, and fail-closed validation."
+              -f commit_message="ASF-MOC v9.0 Production Orchestrator: PR#12 explicitly authorized as architectural bootstrap target; exact-head, exact-base, authentic CI artifact, and fail-closed validation." \
+              "repos/$repo/pulls/$pr/merge"
 
             merged_json=$(gh api "repos/$repo/pulls/$pr")
             merged=$(jq -r '.merged' <<<"$merged_json")
@@ -118,11 +119,12 @@ jobs:
 
             current_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
             echo "READY PR#$pr head=$head run=$run_id main=$current_main"
-            gh api --method PUT "repos/$repo/pulls/$pr/merge" \
+            gh api --method PUT \
               -f merge_method=squash \
               -f sha="$head" \
               -f commit_title="promote(asf-core): PR#$pr governed squash promotion" \
-              -f commit_message="ASF-MOC v9.0 Production Orchestrator: exact-head, authentic CI, artifact evidence, serial promotion."
+              -f commit_message="ASF-MOC v9.0 Production Orchestrator: exact-head, authentic CI, artifact evidence, serial promotion." \
+              "repos/$repo/pulls/$pr/merge"
             new_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
             [[ "$new_main" != "$current_main" ]] || { echo "BLOCK PR#$pr main unchanged"; exit 1; }
             echo "PROMOTED PR#$pr new_main=$new_main"
