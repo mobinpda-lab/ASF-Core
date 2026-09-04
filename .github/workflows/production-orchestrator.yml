@@ -3,7 +3,9 @@ name: ASF-Core Production Orchestrator
 on:
   workflow_dispatch:
   push:
-    branches: ['factory/central-production-orchestrator-20260904']
+    branches:
+      - 'factory/central-production-orchestrator-20260904'
+      - 'factory/operational-completion-thresholds-20260904'
   schedule:
     - cron: '*/5 * * * *'
 
@@ -19,11 +21,10 @@ concurrency:
 
 env:
   REPO: ${{ github.repository }}
-  BOOTSTRAP_PR: '9'
 
 jobs:
   promote:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/factory/central-production-orchestrator-20260904'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/factory/central-production-orchestrator-20260904' || github.ref == 'refs/heads/factory/operational-completion-thresholds-20260904'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact ref
@@ -40,8 +41,12 @@ jobs:
           set -euo pipefail
           repo="$REPO"
 
-          if [[ "$GITHUB_REF" == "refs/heads/factory/central-production-orchestrator-20260904" ]]; then
-            pr="$BOOTSTRAP_PR"
+          if [[ "$GITHUB_REF" == "refs/heads/factory/central-production-orchestrator-20260904" || "$GITHUB_REF" == "refs/heads/factory/operational-completion-thresholds-20260904" ]]; then
+            if [[ "$GITHUB_REF" == "refs/heads/factory/central-production-orchestrator-20260904" ]]; then
+              pr=9
+            else
+              pr=10
+            fi
             json=$(gh api "repos/$repo/pulls/$pr")
             state=$(jq -r '.state' <<<"$json")
             merged=$(jq -r '.merged' <<<"$json")
@@ -65,7 +70,7 @@ jobs:
 
             current_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
             echo "BOOTSTRAP_READY PR#$pr head=$head run=$run_id main=$current_main"
-            gh pr merge "$pr" --repo "$repo" --squash --delete-branch=false --subject "promote(asf-core): PR#9 governed bootstrap" --body "ASF-MOC v9.0 Production Orchestrator bootstrap: exact-head, authentic CI, artifact evidence, fail-closed validation."
+            gh pr merge "$pr" --repo "$repo" --squash --delete-branch=false --subject "promote(asf-core): PR#$pr governed bootstrap" --body "ASF-MOC v9.0 Production Orchestrator bootstrap: exact-head, authentic CI, artifact evidence, fail-closed validation."
             new_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
             [[ "$new_main" != "$current_main" ]] || { echo "BLOCK bootstrap main unchanged"; exit 1; }
             echo "BOOTSTRAP_PROMOTED PR#$pr new_main=$new_main"
@@ -75,10 +80,10 @@ jobs:
           declare -A HEADS
           HEADS[3]='943966fd19e1ee95a9e4c37d1f6cb6d44839e070'
           HEADS[5]='f0199d28fc758e8e2627cfc5ad8ffb1a62113dc4'
-          HEADS[4]='8cb62b33d4c367bf4ba6e9d102d2043212f6462c'
+          HEADS[7]='8cb62b33d4c367bf4ba6e9d102d2043212f6462c'
           HEADS[8]='fa5d9528e5c0647617d7ddd3c1c6bbe533b19e2b'
 
-          for pr in 3 5 4 8; do
+          for pr in 3 5 7 8; do
             json=$(gh api "repos/$repo/pulls/$pr")
             state=$(jq -r '.state' <<<"$json")
             merged=$(jq -r '.merged' <<<"$json")
