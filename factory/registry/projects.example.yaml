@@ -1,4 +1,147 @@
-# Example only. Real projects must be explicitly registered and validated.
-# This file intentionally contains no product source code.
+# ASF-MOC registered workload clients.
+# This registry contains control-plane metadata only; product source remains in each client repository.
 schema_version: "1.0"
-projects: []
+projects:
+  - project_id: arvin-clean
+    repository: mobinpda-lab/Arvin-clean
+    provider: github
+    default_branch: main
+    enabled: true
+    owner: mobinpda-lab
+    adapter: generic
+    task_source: github_issues
+    branch_policy:
+      prefix: factory/
+      base: main
+    pr_policy:
+      base: main
+      required_label: asf-authorized
+    ci_contract:
+      required_workflow: ASF-Core CI
+    required_checks:
+      - ASF-Core CI
+    security_gates:
+      - exact_head
+      - exact_base
+    artifact_requirements:
+      - asf-core-test-results
+    promotion_policy:
+      enabled: true
+      authorization: asf-authorized
+      require_exact_head: true
+      require_exact_base: true
+    release_policy:
+      enabled: false
+    worker_contract:
+      adapter: generic
+    lease_policy:
+      ttl_seconds: 300
+      heartbeat_seconds: 60
+    retry_policy:
+      max_attempts: 3
+    recovery_policy:
+      fail_closed: true
+      bounded_attempts: 3
+    evidence_retention:
+      required: true
+    completion_definition:
+      - exact_head_verified
+      - ci_verified
+      - promotion_verified
+    last_verified_main_sha: 1879f4a6e85a76451e602e67dc6451bfd1a8bd92
+
+  - project_id: yadnegar
+    repository: mobinpda-lab/YadNegar
+    provider: github
+    default_branch: main
+    enabled: true
+    owner: mobinpda-lab
+    adapter: generic
+    task_source: github_issues
+    branch_policy:
+      prefix: factory/
+      base: main
+    pr_policy:
+      base: main
+      required_label: asf-authorized
+    ci_contract:
+      required_workflow: ASF-Core CI
+    required_checks:
+      - ASF-Core CI
+    security_gates:
+      - exact_head
+      - exact_base
+    artifact_requirements:
+      - asf-core-test-results
+    promotion_policy:
+      enabled: true
+      authorization: asf-authorized
+      require_exact_head: true
+      require_exact_base: true
+    release_policy:
+      enabled: false
+    worker_contract:
+      adapter: generic
+    lease_policy:
+      ttl_seconds: 300
+      heartbeat_seconds: 60
+    retry_policy:
+      max_attempts: 3
+    recovery_policy:
+      fail_closed: true
+      bounded_attempts: 3
+    evidence_retention:
+      required: true
+    completion_definition:
+      - exact_head_verified
+      - ci_verified
+      - promotion_verified
+    last_verified_main_sha: 46fa1f6c9027383aa02c6d19e0d8f0eecee40ed9
+
+  - project_id: network-center-monitor
+    repository: mobinpda-lab/NetworkCenterMonitor
+    provider: github
+    default_branch: main
+    enabled: true
+    owner: mobinpda-lab
+    adapter: generic
+    task_source: github_issues
+    branch_policy:
+      prefix: factory/
+      base: main
+    pr_policy:
+      base: main
+      required_label: asf-authorized
+    ci_contract:
+      required_workflow: ASF-Core CI
+    required_checks:
+      - ASF-Core CI
+    security_gates:
+      - exact_head
+      - exact_base
+    artifact_requirements:
+      - asf-core-test-results
+    promotion_policy:
+      enabled: true
+      authorization: asf-authorized
+      require_exact_head: true
+      require_exact_base: true
+    release_policy:
+      enabled: false
+    worker_contract:
+      adapter: generic
+    lease_policy:
+      ttl_seconds: 300
+      heartbeat_seconds: 60
+    retry_policy:
+      max_attempts: 3
+    recovery_policy:
+      fail_closed: true
+      bounded_attempts: 3
+    evidence_retention:
+      required: true
+    completion_definition:
+      - exact_head_verified
+      - ci_verified
+      - promotion_verified
+    last_verified_main_sha: 8ebe93ba0747cffbaa50e748a33aafa04e51877e
