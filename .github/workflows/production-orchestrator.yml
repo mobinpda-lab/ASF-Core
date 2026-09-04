@@ -71,12 +71,16 @@ jobs:
             [[ "$current_main" == "$BOOTSTRAP_BASE_SHA" ]] || { echo "BLOCK bootstrap main HEAD_DRIFT main=$current_main expected=$BOOTSTRAP_BASE_SHA"; exit 1; }
             echo "BOOTSTRAP_READY PR#$pr head=$head base=$base_sha run=$run_id artifact=$BOOTSTRAP_ARTIFACT main=$current_main"
 
-            gh api --method PUT \
-              -f merge_method=squash \
-              -f sha="$head" \
-              -f commit_title="promote(asf-core): PR#12 governed bootstrap" \
-              -f commit_message="ASF-MOC v9.0 Production Orchestrator: PR#12 explicitly authorized as architectural bootstrap target; exact-head, exact-base, authentic CI artifact, and fail-closed validation." \
-              "repos/$repo/pulls/$pr/merge"
+            merge_payload=$(jq -n --arg sha "$head" --arg title "promote(asf-core): PR#12 governed bootstrap" --arg message "ASF-MOC v9.0 Production Orchestrator: PR#12 explicitly authorized as architectural bootstrap target; exact-head, exact-base, authentic CI artifact, and fail-closed validation." '{sha:$sha,merge_method:"squash",commit_title:$title,commit_message:$message}')
+            merge_response=$(curl --fail-with-body -sS -X PUT \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -H "Content-Type: application/json" \
+              "https://api.github.com/repos/$repo/pulls/$pr/merge" \
+              -d "$merge_payload")
+            merge_result=$(jq -r '.merged // false' <<<"$merge_response")
+            [[ "$merge_result" == "true" ]] || { echo "BLOCK bootstrap PR#$pr merge API did not confirm merged=true response=$merge_response"; exit 1; }
 
             merged_json=$(gh api "repos/$repo/pulls/$pr")
             merged=$(jq -r '.merged' <<<"$merged_json")
@@ -119,12 +123,16 @@ jobs:
 
             current_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
             echo "READY PR#$pr head=$head run=$run_id main=$current_main"
-            gh api --method PUT \
-              -f merge_method=squash \
-              -f sha="$head" \
-              -f commit_title="promote(asf-core): PR#$pr governed squash promotion" \
-              -f commit_message="ASF-MOC v9.0 Production Orchestrator: exact-head, authentic CI, artifact evidence, serial promotion." \
-              "repos/$repo/pulls/$pr/merge"
+            merge_payload=$(jq -n --arg sha "$head" --arg title "promote(asf-core): PR#$pr governed squash promotion" --arg message "ASF-MOC v9.0 Production Orchestrator: exact-head, authentic CI, artifact evidence, serial promotion." '{sha:$sha,merge_method:"squash",commit_title:$title,commit_message:$message}')
+            merge_response=$(curl --fail-with-body -sS -X PUT \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -H "Content-Type: application/json" \
+              "https://api.github.com/repos/$repo/pulls/$pr/merge" \
+              -d "$merge_payload")
+            merge_result=$(jq -r '.merged // false' <<<"$merge_response")
+            [[ "$merge_result" == "true" ]] || { echo "BLOCK PR#$pr merge API did not confirm merged=true response=$merge_response"; exit 1; }
             new_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
             [[ "$new_main" != "$current_main" ]] || { echo "BLOCK PR#$pr main unchanged"; exit 1; }
             echo "PROMOTED PR#$pr new_main=$new_main"
