@@ -3,7 +3,7 @@ name: ASF-Core Production Orchestrator
 on:
   workflow_dispatch:
   push:
-    branches: ['factory/independent-control-plane-hardening-20260904', 'factory/github-app-runtime-20260904', 'main']
+    branches: ['factory/independent-control-plane-hardening-20260904', 'factory/github-app-runtime-20260904', 'factory/github-app-key-normalization-20260904', 'main']
   schedule:
     - cron: '*/5 * * * *'
 
@@ -24,7 +24,7 @@ env:
 
 jobs:
   promote:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/factory/independent-control-plane-hardening-20260904' || github.ref == 'refs/heads/factory/github-app-runtime-20260904'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/factory/independent-control-plane-hardening-20260904' || github.ref == 'refs/heads/factory/github-app-runtime-20260904' || github.ref == 'refs/heads/factory/github-app-key-normalization-20260904'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact ref
@@ -33,12 +33,28 @@ jobs:
           ref: ${{ github.ref_name }}
           fetch-depth: 0
 
+      - name: Normalize GitHub App private key
+        id: normalized-key
+        env:
+          ASF_MOC_APP_PRIVATE_KEY_RAW: ${{ secrets.ASF_MOC_APP_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          key="$ASF_MOC_APP_PRIVATE_KEY_RAW"
+          # Accept both a real multiline PEM and a single-line value containing literal \\n          # escape sequences. Never print the key or its contents.
+          key="${key//\\n/$'\\n'}"
+          if [[ "$key" != *"-----BEGIN "*"PRIVATE KEY-----"* ]] || [[ "$key" != *"-----END "*"PRIVATE KEY-----"* ]]; then
+            echo "BLOCK GitHub App private key is not a recognizable PEM private-key value"
+            exit 1
+          fi
+          printf 'private-key<<ASF_MOC_KEY_EOF\n%s\nASF_MOC_KEY_EOF\n' "$key" >> "$GITHUB_OUTPUT"
+
       - name: Mint GitHub App installation token
         id: app-token
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ secrets.ASF_MOC_APP_ID }}
-          private-key: ${{ secrets.ASF_MOC_APP_PRIVATE_KEY }}
+          private-key: ${{ steps.normalized-key.outputs.private-key }}
           owner: mobinpda-lab
           repositories: ASF-Core,Arvin-clean,YadNegar,NetworkCenterMonitor
 
