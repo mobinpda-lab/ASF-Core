@@ -16,6 +16,7 @@ jobs:
       - name: Checkout exact head
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -28,11 +29,13 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
+          import json
           import xml.etree.ElementTree as ET
 
           required = [
               Path('.github/workflows/ci.yml'),
               Path('.github/workflows/production-orchestrator.yml'),
+              Path('factory/registry/promotion-policy.json'),
           ]
           checks = []
           for path in required:
@@ -43,16 +46,20 @@ jobs:
 
           ci = Path('.github/workflows/ci.yml').read_text()
           orch = Path('.github/workflows/production-orchestrator.yml').read_text()
+          policy = json.loads(Path('factory/registry/promotion-policy.json').read_text())
+          promotion = policy['promotion']
 
           contract_checks = {
-              'ci_exact_head_checkout': 'actions/checkout@v4' in ci and 'fetch-depth: 0' in ci,
+              'ci_exact_head_checkout': 'github.event.pull_request.head.sha' in ci and 'fetch-depth: 0' in ci,
               'ci_read_only_contents': 'contents: read' in ci,
               'orchestrator_main_guard': "github.ref == 'refs/heads/main'" in orch,
-              'orchestrator_exact_head_guard': '[[ "$head" == "${HEADS[$pr]}" ]]' in orch or 'BOOTSTRAP_HEAD_SHA' in orch,
-              'orchestrator_artifact_guard': 'asf-core-test-results' in orch,
-              'orchestrator_serial_promotion': 'for pr in 3 5 4 8' in orch or 'BOOTSTRAP_PR' in orch,
-              'orchestrator_squash_merge': ('gh pr merge' in orch and '--squash' in orch) or ('pulls/$pr/merge' in orch and 'merge_method:"squash"' in orch),
-              'orchestrator_exact_main_verification': '[[ "$new_main" != "$current_main" ]]' in orch,
+              'orchestrator_dynamic_discovery': 'pulls?state=open&base=main' in orch and 'required_label' in orch,
+              'orchestrator_exact_head_guard': 'HEAD_DRIFT' in orch and '.head.sha' in orch,
+              'orchestrator_artifact_guard': 'required_artifact' in orch and 'artifacts' in orch,
+              'orchestrator_serial_promotion': 'max_candidates_per_cycle' in orch and 'candidate overflow' in orch,
+              'orchestrator_squash_merge': 'pulls/$pr/merge' in orch and 'merge_method:"squash"' in orch,
+              'orchestrator_exact_main_verification': 'main postcondition mismatch' in orch and 'new_main' in orch,
+              'registry_policy_valid': policy.get('schema_version') == '1.0' and promotion.get('enabled') is True,
           }
           checks.extend(contract_checks.items())
 
