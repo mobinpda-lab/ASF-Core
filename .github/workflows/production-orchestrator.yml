@@ -64,7 +64,8 @@ jobs:
             run_id=$(jq -r --arg sha "$head" '[.[] | select(.headSha == $sha and .status == "completed" and .conclusion == "success" and .workflowName == "ASF-Core CI")][0].databaseId // empty' <<<"$runs")
             [[ -n "$run_id" ]] || { echo "BLOCK bootstrap PR#$pr no exact-head successful ASF-Core CI"; exit 1; }
 
-            artifact_count=$(gh api "repos/$repo/actions/runs/$run_id/artifacts" --jq --arg artifact "$BOOTSTRAP_ARTIFACT" '[.artifacts[] | select(.name == $artifact and .expired == false)] | length')
+            artifact_json=$(gh api "repos/$repo/actions/runs/$run_id/artifacts")
+            artifact_count=$(jq --arg artifact "$BOOTSTRAP_ARTIFACT" '[.artifacts[] | select(.name == $artifact and .expired == false)] | length' <<<"$artifact_json")
             [[ "$artifact_count" -gt 0 ]] || { echo "BLOCK bootstrap PR#$pr run=$run_id missing artifact=$BOOTSTRAP_ARTIFACT"; exit 1; }
 
             current_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
@@ -118,7 +119,8 @@ jobs:
             runs=$(gh run list --repo "$repo" --commit "$head" --json databaseId,status,conclusion,workflowName,headSha --limit 20)
             run_id=$(jq -r --arg sha "$head" '[.[] | select(.headSha == $sha and .status == "completed" and .conclusion == "success" and .workflowName == "ASF-Core CI")][0].databaseId // empty' <<<"$runs")
             [[ -n "$run_id" ]] || { echo "BLOCK PR#$pr no exact-head successful ASF-Core CI run"; exit 1; }
-            artifact_count=$(gh api "repos/$repo/actions/runs/$run_id/artifacts" --jq --arg artifact "$BOOTSTRAP_ARTIFACT" '[.artifacts[] | select(.name == $artifact and .expired == false)] | length')
+            artifact_json=$(gh api "repos/$repo/actions/runs/$run_id/artifacts")
+            artifact_count=$(jq --arg artifact "$BOOTSTRAP_ARTIFACT" '[.artifacts[] | select(.name == $artifact and .expired == false)] | length' <<<"$artifact_json")
             [[ "$artifact_count" -gt 0 ]] || { echo "BLOCK PR#$pr exact run=$run_id has no test artifact"; exit 1; }
 
             current_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
