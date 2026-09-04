@@ -19,9 +19,9 @@ concurrency:
 
 env:
   REPO: ${{ github.repository }}
-  BOOTSTRAP_PR: '12'
-  BOOTSTRAP_HEAD_SHA: 'af9ad00dcfdbde70f5ec0c244c0e4c5b5062569f'
-  BOOTSTRAP_BASE_SHA: '9afbad7264b84619bb307d34e19eb2c0bb6d0398'
+  BOOTSTRAP_PR: '13'
+  BOOTSTRAP_HEAD_SHA: 'a354cc2ed5c487bd9d493475f3cec6956099f0cb'
+  BOOTSTRAP_BASE_SHA: '692dd65501e93f39c7b1dcf25651fb9a61c566f3'
   BOOTSTRAP_ARTIFACT: 'asf-core-test-results'
 
 jobs:
@@ -72,7 +72,7 @@ jobs:
             [[ "$current_main" == "$BOOTSTRAP_BASE_SHA" ]] || { echo "BLOCK bootstrap main HEAD_DRIFT main=$current_main expected=$BOOTSTRAP_BASE_SHA"; exit 1; }
             echo "BOOTSTRAP_READY PR#$pr head=$head base=$base_sha run=$run_id artifact=$BOOTSTRAP_ARTIFACT main=$current_main"
 
-            merge_payload=$(jq -n --arg sha "$head" --arg title "promote(asf-core): PR#12 governed bootstrap" --arg message "ASF-MOC v9.0 Production Orchestrator: PR#12 explicitly authorized as architectural bootstrap target; exact-head, exact-base, authentic CI artifact, and fail-closed validation." '{sha:$sha,merge_method:"squash",commit_title:$title,commit_message:$message}')
+            merge_payload=$(jq -n --arg sha "$head" --arg title "promote(asf-core): PR#13 governed orchestrator activation" --arg message "ASF-MOC v9.0 Production Orchestrator: PR#13 authorized to activate the factory orchestrator; exact-head, exact-base, authentic CI artifact, and fail-closed validation." '{sha:$sha,merge_method:"squash",commit_title:$title,commit_message:$message}')
             merge_response=$(curl --fail-with-body -sS -X PUT \
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer $GH_TOKEN" \
