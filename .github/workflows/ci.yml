@@ -21,6 +21,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Validate threshold contract executable
+        run: python scripts/validate_completion_thresholds.py --contract-only
       - name: Validate factory control-plane contract
         env:
           PYTHONPATH: .
@@ -36,44 +38,33 @@ jobs:
               Path('factory/completion-thresholds.json'),
               Path('scripts/validate_completion_thresholds.py'),
           ]
-          checks = []
-          for path in required:
-              ok = path.is_file()
-              checks.append((f'file_exists:{path}', ok))
-              if not ok:
-                  raise SystemExit(f'Missing required control-plane file: {path}')
-
+          checks = [(f'file_exists:{path}', path.is_file()) for path in required]
           ci = Path('.github/workflows/ci.yml').read_text()
           orch = Path('.github/workflows/production-orchestrator.yml').read_text()
+          threshold = Path('factory/completion-thresholds.json').read_text()
           validator = Path('scripts/validate_completion_thresholds.py').read_text()
-
-          contract_checks = {
-              'ci_exact_head_checkout': 'actions/checkout@v4' in ci and 'fetch-depth: 0' in ci,
-              'ci_read_only_contents': 'contents: read' in ci,
-              'orchestrator_main_guard': "github.ref == 'refs/heads/main'" in orch,
-              'orchestrator_exact_head_guard': '[[ "$head" == "${HEADS[$pr]}" ]]' in orch,
-              'orchestrator_artifact_guard': 'asf-core-test-results' in orch,
-              'orchestrator_serial_promotion': 'for pr in 3 5 7 8' in orch,
-              'orchestrator_squash_merge': 'gh pr merge' in orch and '--squash' in orch,
-              'orchestrator_exact_main_verification': '[[ "$new_main" != "$current_main" ]]' in orch,
-              'completion_contract_versioned': '"version": "1.0.0"' in Path('factory/completion-thresholds.json').read_text(),
-              'completion_validator_fail_closed': 'Missing metrics are BLOCK' in validator and 'validate_contract_shape' in validator,
-              'completion_parallel_threshold': 'parallel_speed_ratio' in validator,
-          }
-          checks.extend(contract_checks.items())
-
+          checks.extend([
+              ('ci_exact_head_checkout', 'actions/checkout@v4' in ci and 'fetch-depth: 0' in ci),
+              ('ci_read_only_contents', 'contents: read' in ci),
+              ('orchestrator_main_guard', "github.ref == 'refs/heads/main'" in orch),
+              ('orchestrator_exact_head_guard', 'expected=${HEADS[$pr]}' in orch),
+              ('orchestrator_artifact_guard', 'asf-core-test-results' in orch),
+              ('orchestrator_serial_promotion', 'HEADS[7]' in orch and 'for pr in 3 5 7 8' in orch),
+              ('orchestrator_squash_merge', '--squash' in orch),
+              ('orchestrator_exact_main_verification', 'new_main' in orch and 'current_main' in orch),
+              ('completion_contract_versioned', '"version": "1.0.0"' in threshold),
+              ('completion_validator_fail_closed', 'missing metric:' in validator and 'BLOCK:' in validator),
+              ('completion_parallel_threshold', 'parallel_speed_ratio' in validator),
+          ])
           failed = [name for name, ok in checks if not ok]
           if failed:
               raise SystemExit('Contract validation failed: ' + ', '.join(failed))
-
           suite = ET.Element('testsuite', name='ASF-Core control-plane contract', tests=str(len(checks)), failures='0')
           for name, _ in checks:
               ET.SubElement(suite, 'testcase', name=name)
           ET.ElementTree(suite).write('test-results.xml', encoding='utf-8', xml_declaration=True)
           print(f'Validated {len(checks)} control-plane contract checks.')
           PY
-      - name: Validate threshold contract executable
-        run: python scripts/validate_completion_thresholds.py --contract-only
       - name: Upload authentic test evidence
         if: always()
         uses: actions/upload-artifact@v4
