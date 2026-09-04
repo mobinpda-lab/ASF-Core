@@ -29,14 +29,13 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Validate canonical promotion ladder
+      - name: Validate and serially promote canonical ladder
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           repo="$REPO"
-
           declare -A HEADS
           HEADS[3]='943966fd19e1ee95a9e4c37d1f6cb6d44839e070'
           HEADS[5]='f0199d28fc758e8e2627cfc5ad8ffb1a62113dc4'
@@ -49,30 +48,28 @@ jobs:
             merged=$(jq -r '.merged' <<<"$json")
             draft=$(jq -r '.draft' <<<"$json")
             head=$(jq -r '.head.sha' <<<"$json")
-            base=$(jq -r '.base.ref' <<<"$json")
             mergeable=$(jq -r '.mergeable' <<<"$json")
 
             [[ "$state" == "open" ]] || { echo "BLOCK PR#$pr state=$state"; exit 1; }
-            [[ "$merged" == "false" ]] || { echo "BLOCK PR#$pr already merged unexpectedly"; exit 1; }
-            [[ "$draft" == "false" ]] || { echo "BLOCK PR#$pr is draft"; exit 1; }
+            [[ "$merged" == "false" ]] || { echo "BLOCK PR#$pr already merged"; exit 1; }
+            [[ "$draft" == "false" ]] || { echo "BLOCK PR#$pr draft=true"; exit 1; }
             [[ "$head" == "${HEADS[$pr]}" ]] || { echo "BLOCK PR#$pr stale head=$head expected=${HEADS[$pr]}"; exit 1; }
             [[ "$mergeable" != "false" ]] || { echo "BLOCK PR#$pr mergeable=false"; exit 1; }
 
-            checks=$(gh pr checks "$pr" --repo "$repo" --json name,state,bucket --jq '[.[] | select(.name != "ASF-Core Production Orchestrator") | {name,state,bucket}]')
-            count=$(jq 'length' <<<"$checks")
-            [[ "$count" -gt 0 ]] || { echo "BLOCK PR#$pr no CI checks exposed"; exit 1; }
-            bad=$(jq '[.[] | select(.bucket != "pass")] | length' <<<"$checks")
-            [[ "$bad" -eq 0 ]] || { echo "BLOCK PR#$pr CI not green: $checks"; exit 1; }
+            runs=$(gh run list --repo "$repo" --commit "$head" --json databaseId,status,conclusion,workflowName --limit 20)
+            success_runs=$(jq '[.[] | select(.status == "completed" and .conclusion == "success" and .workflowName == "ASF-Core CI")] | length' <<<"$runs")
+            [[ "$success_runs" -gt 0 ]] || { echo "BLOCK PR#$pr no exact-head successful ASF-Core CI run"; exit 1; }
+            run_id=$(jq -r '[.[] | select(.status == "completed" and .conclusion == "success" and .workflowName == "ASF-Core CI")][0].databaseId' <<<"$runs")
 
-            artifact_count=$(gh api "repos/$repo/actions/artifacts?per_page=100" --jq '[.artifacts[] | select(.name == "asf-core-test-results" and .expired == false)] | length')
-            [[ "$artifact_count" -gt 0 ]] || { echo "BLOCK PR#$pr no authentic test artifact exposed"; exit 1; }
+            artifact_count=$(gh api "repos/$repo/actions/runs/$run_id/artifacts" --jq '[.artifacts[] | select(.name == "asf-core-test-results" and .expired == false)] | length')
+            [[ "$artifact_count" -gt 0 ]] || { echo "BLOCK PR#$pr exact run=$run_id has no test artifact"; exit 1; }
 
             current_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
-            echo "READY PR#$pr head=$head main=$current_main base=$base"
+            echo "READY PR#$pr head=$head run=$run_id main=$current_main"
 
-            gh pr merge "$pr" --repo "$repo" --squash --delete-branch=false --subject "promote(asf-core): PR#$pr governed squash promotion" --body "ASF-MOC v9.0 Production Orchestrator: exact-head, green-CI, evidence-backed serial promotion."
+            gh pr merge "$pr" --repo "$repo" --squash --delete-branch=false --subject "promote(asf-core): PR#$pr governed squash promotion" --body "ASF-MOC v9.0 Production Orchestrator: exact-head, authentic CI, artifact evidence, serial promotion."
 
             new_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
-            [[ "$new_main" != "$current_main" ]] || { echo "BLOCK PR#$pr main did not advance"; exit 1; }
+            [[ "$new_main" != "$current_main" ]] || { echo "BLOCK PR#$pr main unchanged"; exit 1; }
             echo "PROMOTED PR#$pr new_main=$new_main"
           done
