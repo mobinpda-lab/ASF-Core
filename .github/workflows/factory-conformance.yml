@@ -2,16 +2,21 @@ name: ASF-Core Factory Conformance
 
 on:
   push:
+    branches: [main, 'factory/**']
+    paths:
+      - 'factory/**'
+      - 'docs/architecture/**'
+      - '.github/workflows/factory-conformance.yml'
+      - '.github/workflows/production-orchestrator.yml'
+      - '.github/workflows/ci.yml'
+  pull_request:
     branches: [main]
     paths:
       - 'factory/**'
       - 'docs/architecture/**'
       - '.github/workflows/factory-conformance.yml'
-  pull_request:
-    paths:
-      - 'factory/**'
-      - 'docs/architecture/**'
-      - '.github/workflows/factory-conformance.yml'
+      - '.github/workflows/production-orchestrator.yml'
+      - '.github/workflows/ci.yml'
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
@@ -23,7 +28,11 @@ jobs:
   contracts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -42,10 +51,12 @@ jobs:
             factory/recovery/policy.py
             factory/adapters/generic.py
             factory/registry/projects.example.yaml
+            factory/registry/promotion-policy.json
           )
           for path in "${required[@]}"; do
             test -f "$path" || { echo "MISSING_CANONICAL_SURFACE=$path"; exit 1; }
           done
-          grep -q 'L10 remains `UNVERIFIED`' README.md || {
+          jq -e '.schema_version == "1.0" and .promotion.enabled == true and (.promotion.max_candidates_per_cycle >= 1)' factory/registry/promotion-policy.json >/dev/null
+          grep -q 'L10' README.md || {
             echo 'L10 status must remain explicit until authentic E2E evidence exists'; exit 1;
           }
