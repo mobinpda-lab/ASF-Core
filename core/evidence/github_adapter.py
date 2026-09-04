@@ -1,6 +1,5 @@
 """GitHub provider adapter normalization with fail-closed diagnostics."""
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from .provider import ObservationState, ProviderObservation
@@ -21,8 +20,13 @@ class GitHubAdapter:
         missing = set(required) - present
         values = {name: tuple(source.get(name) or ()) for name in required}
 
-        if any(self._mismatch(repository, commit_sha, item) for group in values.values() for item in group):
-            return self._result(ObservationState.INCONSISTENT, "LOW", "repository or exact SHA mismatch", values)
+        for group in values.values():
+            for item in group:
+                if item.get("repository") not in (None, repository):
+                    raise ValueError("evidence repository mismatch")
+                observed = item.get("commit_sha") or item.get("head_sha")
+                if observed not in (None, commit_sha):
+                    raise ValueError("stale or mismatched commit SHA")
         if source.get("delayed") is True or source.get("retry_after") is not None:
             return self._result(ObservationState.DELAYED, "LOW", "provider data is delayed", values)
         if source.get("inconsistent") is True:
