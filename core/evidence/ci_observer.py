@@ -52,10 +52,10 @@ class EvidenceObserver:
         elif provider_state is ObservationState.DELAYED:
             state = Visibility.PENDING
         elif provider_state is ObservationState.PARTIAL and state in {Visibility.SUCCESS, Visibility.FAILURE}:
-            # The normalized terminal result is authoritative when the omitted
-            # provider sections are non-essential to that result.
+            # Terminal state is determinable from the authoritative execution
+            # records even when non-essential provider sections are omitted.
             provider_state = ObservationState.AVAILABLE
-        elif provider_state is ObservationState.PARTIAL:
+        elif provider_state is ObservationState.PARTIAL and state is Visibility.PENDING:
             state = Visibility.PENDING
         reason = "normalized terminal evidence" if provider_state is ObservationState.AVAILABLE else provider_state.value.lower()
         return EvidenceRecord(repository, commit_sha, *(values[name] for name in sections), state, provider_state, "HIGH" if provider_state is ObservationState.AVAILABLE else "LOW", reason)
