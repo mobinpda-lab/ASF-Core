@@ -1,0 +1,52 @@
+{
+  "version": "1.0.0",
+  "critical": {
+    "governance_violations": {"max": 0},
+    "manual_merges": {"max": 0},
+    "direct_main_writes": {"max": 0},
+    "force_pushes": {"max": 0},
+    "unknown_promotions": {"max": 0},
+    "exact_sha_match_rate": {"min": 1.0, "sample_min": 1},
+    "promotion_success_rate": {"min": 1.0, "sample_min": 1}
+  },
+  "factory": {
+    "registry_coverage": {"min": 1.0},
+    "dependency_coverage": {"min": 1.0},
+    "duplicate_active_tasks": {"max": 0},
+    "duplicate_worker_leases": {"max": 0},
+    "parallel_waves": {"min": 3},
+    "min_parallel_tasks_per_wave": {"min": 2},
+    "worker_success_rate": {"min": 0.95, "sample_min": 20},
+    "task_completion_rate": {"min": 0.95, "sample_min": 20},
+    "recovery_success_rate": {"min": 0.90, "sample_min": 10},
+    "queue_refill_p95_seconds": {"max": 300},
+    "recovery_p95_seconds": {"max": 900}
+  },
+  "evidence": {
+    "evidence_completeness_rate": {"min": 1.0, "sample_min": 1},
+    "evidence_freshness_p95_seconds": {"max": 900},
+    "expired_artifacts": {"max": 0}
+  },
+  "products": {
+    "required_repositories": {"min_count": 3},
+    "cross_repo_ingestion_rate": {"min": 0.99, "sample_min": 100},
+    "wrong_repo_routing": {"max": 0},
+    "orphan_tasks": {"max": 0}
+  },
+  "ncm_control_plane": {
+    "e2e_cycles": {"min": 10},
+    "ingestion_rate": {"min": 0.99, "sample_min": 100},
+    "diagnosis_rate": {"min": 0.95, "sample_min": 10},
+    "control_trigger_rate": {"min": 0.95, "sample_min": 10},
+    "recovery_rate": {"min": 0.90, "sample_min": 10},
+    "orphan_events": {"max": 0},
+    "unclassified_events": {"max": 0}
+  },
+  "completion": {
+    "required_open_tasks": {"max": 0},
+    "blocked_required_tasks": {"max": 0},
+    "recovery_queue": {"max": 0},
+    "unknown_gates": {"max": 0},
+    "unverified_promotions": {"max": 0}
+  }
+}
