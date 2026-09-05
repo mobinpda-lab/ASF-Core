@@ -65,8 +65,8 @@ jobs:
         id: app_token
         uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ secrets.NIRA_GITHUB_APP_ID }}
-          private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.ASF_MOC_APP_ID }}
+          private-key: ${{ secrets.ASF_MOC_APP_PRIVATE_KEY }}
           owner: mobinpda-lab
           repositories: ASF-Core,Arvin-clean,YadNegar,NetworkCenterMonitor
       - name: Validate exact client HEAD and perform bounded client execution
