@@ -1,0 +1,52 @@
+name: NIRA Intake Queue
+
+on:
+  issues:
+    types: [opened, labeled, unlabeled, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: nira-intake-queue-${{ github.event.issue.number || 'manual' }}
+  cancel-in-progress: false
+
+jobs:
+  intake:
+    if: github.event_name == 'workflow_dispatch' || github.event.issue.pull_request == null
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reconcile issue into durable GitHub queue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            if (!issue) {
+              core.info('Manual invocation: no issue payload; no queue mutation performed.');
+              return;
+            }
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const labels = issue.labels.map(x => x.name);
+            if (!labels.includes('factory:ready')) {
+              core.info('Issue is not factory:ready; no intake performed.');
+              return;
+            }
+            const marker = '<!-- nira-intake-v1 -->';
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: issue.number, per_page: 100
+            });
+            if (comments.some(c => c.body && c.body.includes(marker))) {
+              core.info(`Already intaken: #${issue.number}`);
+              return;
+            }
+            await github.rest.issues.addLabels({
+              owner, repo, issue_number: issue.number,
+              labels: ['factory:queued']
+            });
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: issue.number,
+              body: `${marker}\nNIRA_INTAKE=ACCEPTED\nNIRA_QUEUE=GITHUB_ISSUE\nISSUE=${issue.number}\nSHA=${context.sha}`
+            });
