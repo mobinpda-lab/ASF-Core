@@ -39,6 +39,10 @@ jobs:
               if (now - new Date(latest.created_at).getTime() <= ttlMs) continue;
               const recoveryMarker = `<!-- nira-recovery-v1:${issue.number}:${latest.id} -->`;
               if (comments.some(c => c.body && c.body.includes(recoveryMarker))) continue;
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: issue.number,
+                body: `${recoveryMarker}\nNIRA_LEASE=EXPIRED\nLEASE_COMMENT=${latest.id}\nOBSERVED_AT=${new Date().toISOString()}`
+              });
               await github.rest.issues.removeLabel({owner, repo, issue_number: issue.number, name: 'factory:leased'}).catch(() => {});
               await github.rest.issues.addLabels({owner, repo, issue_number: issue.number, labels: ['factory:queued']});
               await github.rest.issues.createComment({
