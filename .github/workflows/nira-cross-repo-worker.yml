@@ -1,0 +1,101 @@
+name: NIRA Cross-Repository Worker
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: 'Registered client repository (owner/name)'
+        required: true
+        type: string
+      issue_number:
+        description: 'Client issue number'
+        required: true
+        type: string
+      expected_main_sha:
+        description: 'Exact client main SHA leased by NIRA'
+        required: true
+        type: string
+      worker_id:
+        description: 'Unique NIRA worker identity'
+        required: true
+        type: string
+      lease_id:
+        description: 'NIRA lease identifier'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: nira-worker-${{ inputs.repository }}-${{ inputs.issue_number }}
+  cancel-in-progress: false
+env:
+  REGISTERED_REPOSITORIES: 'mobinpda-lab/ASF-Core mobinpda-lab/Arvin-clean mobinpda-lab/YadNegar mobinpda-lab/NetworkCenterMonitor'
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate execution inputs and repository allowlist
+        shell: bash
+        env:
+          CLIENT_REPOSITORY: ${{ inputs.repository }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          WORKER_ID: ${{ inputs.worker_id }}
+          LEASE_ID: ${{ inputs.lease_id }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+        run: |
+          set -euo pipefail
+          test -n "$WORKER_ID"
+          test -n "$LEASE_ID"
+          test "$ISSUE_NUMBER" -gt 0
+          test "$CLIENT_REPOSITORY" = "mobinpda-lab/ASF-Core" || test "$CLIENT_REPOSITORY" = "mobinpda-lab/Arvin-clean" || test "$CLIENT_REPOSITORY" = "mobinpda-lab/YadNegar" || test "$CLIENT_REPOSITORY" = "mobinpda-lab/NetworkCenterMonitor"
+          test "${#EXPECTED_MAIN_SHA}" -eq 40
+          echo "NIRA_WORKER_ID=$WORKER_ID"
+          echo "NIRA_LEASE_ID=$LEASE_ID"
+          echo "NIRA_CLIENT_REPOSITORY=$CLIENT_REPOSITORY"
+      - name: Fail closed when GitHub App binding is unavailable
+        id: app_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.NIRA_GITHUB_APP_ID }}
+          private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
+          owner: mobinpda-lab
+          repositories: ASF-Core,Arvin-clean,YadNegar,NetworkCenterMonitor
+      - name: Validate exact client HEAD with App identity
+        uses: actions/github-script@v7
+        env:
+          GH_APP_TOKEN: ${{ steps.app_token.outputs.token }}
+          CLIENT_REPOSITORY: ${{ inputs.repository }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+        with:
+          github-token: ${{ steps.app_token.outputs.token }}
+          script: |
+            const [owner, repo] = process.env.CLIENT_REPOSITORY.split('/');
+            if (!owner || !repo) throw new Error('INVALID_CLIENT_REPOSITORY');
+            const ref = await github.rest.git.getRef({ owner, repo, ref: 'heads/main' });
+            const observed = ref.data.object.sha;
+            if (observed !== process.env.EXPECTED_MAIN_SHA) {
+              core.setFailed(`NIRA_FENCING=HEAD_DRIFT expected=${process.env.EXPECTED_MAIN_SHA} observed=${observed}`);
+              return;
+            }
+            core.notice(`NIRA_IDENTITY=GITHUB_APP_INSTALLATION_TOKEN`);
+            core.notice(`NIRA_FENCING=EXACT_HEAD_CONFIRMED sha=${observed}`);
+      - name: Record execution boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo 'NIRA_EXECUTION_BOUNDARY=AUTHORIZED'
+            echo 'NIRA_WORKER_RUNTIME=REAL_GITHUB_ACTIONS'
+            echo 'NIRA_CREDENTIAL_MODEL=GITHUB_APP_INSTALLATION_TOKEN'
+            echo "NIRA_CLIENT_REPOSITORY=${{ inputs.repository }}"
+            echo "NIRA_ISSUE=${{ inputs.issue_number }}"
+            echo "NIRA_EXPECTED_MAIN_SHA=${{ inputs.expected_main_sha }}"
+            echo "NIRA_WORKER_ID=${{ inputs.worker_id }}"
+            echo "NIRA_LEASE_ID=${{ inputs.lease_id }}"
+          } | tee nira-worker-evidence.txt
+      - name: Upload execution boundary evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nira-worker-boundary-${{ inputs.issue_number }}
+          path: nira-worker-evidence.txt
+          if-no-files-found: error
