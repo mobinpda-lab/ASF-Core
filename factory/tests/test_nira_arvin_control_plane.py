@@ -3,9 +3,9 @@ from datetime import datetime, timezone
 import pytest
 
 from factory.adapters.arvin import ArvinClientAdapter
-from factory.contracts.schema import Task, TaskState
+from factory.contracts.schema import Evidence, ObservationState, Task, TaskState
 from factory.nira_control_plane import NIRAControlPlane
-from factory.runtime.state_machine import LeaseDecision, validate_lease
+from factory.runtime.state_machine import validate_lease
 
 
 def make_task() -> Task:
@@ -16,6 +16,25 @@ def make_task() -> Task:
         objective="real client E2E validation task",
         base_main_sha="a" * 40,
         idempotency_key="arvin-clean:arvin-e2e-001:" + "a" * 40 + ":0",
+    )
+
+
+def make_evidence(task: Task, state: ObservationState, run_id: int) -> Evidence:
+    return Evidence(
+        evidence_id=f"evidence-{run_id}",
+        repo="mobinpda-lab/Arvin-clean",
+        project_id="arvin-clean",
+        task_id=task.task_id,
+        pr_number=1,
+        exact_head_sha="b" * 40,
+        base_sha="a" * 40,
+        workflow_id="ASF-Core CI",
+        run_id=run_id,
+        event="test-independent-observation",
+        observation_state=state,
+        confidence="HIGH" if state is ObservationState.VERIFIED else "NONE",
+        collector_identity="nira-evidence-collector",
+        observed_at="2026-09-05T00:00:00+00:00",
     )
 
 
@@ -67,19 +86,10 @@ def test_gate_requires_exact_base_head_and_ci():
     assert blocked.result.value == "BLOCKED"
 
 
-def test_promotion_is_only_an_authorization_result_after_verified_evidence():
+def test_promotion_requires_collector_derived_verified_evidence():
     cp = NIRAControlPlane(ArvinClientAdapter())
     task = make_task()
-    evidence = cp.record_evidence(
-        task=task,
-        pr_number=1,
-        base_sha="a" * 40,
-        head_sha="b" * 40,
-        workflow_id="ASF-Core CI",
-        run_id=123,
-        collector_identity="nira-evidence-collector",
-        verified=True,
-    )
+    evidence = cp.record_evidence(make_evidence(task, ObservationState.VERIFIED, 123))
     assert cp.promotion_gate(evidence.evidence_id) is True
     assert not hasattr(ArvinClientAdapter(), "merge")
     assert not hasattr(ArvinClientAdapter(), "promote")
@@ -88,14 +98,5 @@ def test_promotion_is_only_an_authorization_result_after_verified_evidence():
 def test_unverified_evidence_cannot_authorize_promotion():
     cp = NIRAControlPlane(ArvinClientAdapter())
     task = make_task()
-    evidence = cp.record_evidence(
-        task=task,
-        pr_number=1,
-        base_sha="a" * 40,
-        head_sha="b" * 40,
-        workflow_id="ASF-Core CI",
-        run_id=124,
-        collector_identity="nira-evidence-collector",
-        verified=False,
-    )
+    evidence = cp.record_evidence(make_evidence(task, ObservationState.NOT_EXPOSED, 124))
     assert cp.promotion_gate(evidence.evidence_id) is False
