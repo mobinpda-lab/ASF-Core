@@ -1,4 +1,4 @@
-# ASF-MOC registered workload clients.
+# NIRA registered workload clients.
 # This registry contains control-plane metadata only; product source remains in each client repository.
 schema_version: "1.0"
 projects:
@@ -8,7 +8,7 @@ projects:
     default_branch: main
     enabled: true
     owner: mobinpda-lab
-    adapter: generic
+    adapter: nira-arvin
     task_source: github_issues
     branch_policy:
       prefix: factory/
@@ -27,13 +27,13 @@ projects:
       - asf-core-test-results
     promotion_policy:
       enabled: true
-      authorization: asf-authorized
+      authorization: nira
       require_exact_head: true
       require_exact_base: true
     release_policy:
       enabled: false
     worker_contract:
-      adapter: generic
+      adapter: nira-arvin
     lease_policy:
       ttl_seconds: 300
       heartbeat_seconds: 60
@@ -48,7 +48,7 @@ projects:
       - exact_head_verified
       - ci_verified
       - promotion_verified
-    last_verified_main_sha: 1879f4a6e85a76451e602e67dc6451bfd1a8bd92
+    last_verified_main_sha: 9a773b7898ff63276ad6a214009b163f904e8923
 
   - project_id: yadnegar
     repository: mobinpda-lab/YadNegar
