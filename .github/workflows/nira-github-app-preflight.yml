@@ -1,0 +1,68 @@
+name: NIRA GitHub App Preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: 'Registered client repository owner/name'
+        required: true
+        type: string
+      expected_main_sha:
+        description: 'Exact client main SHA to validate'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail closed when App credentials are not provisioned
+        env:
+          APP_ID: ${{ secrets.NIRA_GITHUB_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$APP_ID" || { echo 'NIRA_BLOCKED=MISSING_APP_ID'; exit 1; }
+          test -n "$APP_PRIVATE_KEY" || { echo 'NIRA_BLOCKED=MISSING_APP_PRIVATE_KEY'; exit 1; }
+          echo 'NIRA_CREDENTIAL_SOURCE=GITHUB_APP'
+          echo 'NIRA_CREDENTIAL_TYPE=INSTALLATION_TOKEN'
+          echo 'NIRA_PAT_USAGE=FORBIDDEN'
+
+      - name: Validate App installation access and exact client HEAD
+        uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.NIRA_GITHUB_APP_ID }}
+          private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ASF-Core,Arvin-clean,YadNegar,NetworkCenterMonitor
+
+      - name: Verify target repository and HEAD
+        uses: actions/github-script@v7
+        env:
+          CLIENT_REPOSITORY: ${{ inputs.repository }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const target = process.env.CLIENT_REPOSITORY;
+            const allowed = new Set([
+              'mobinpda-lab/ASF-Core',
+              'mobinpda-lab/Arvin-clean',
+              'mobinpda-lab/YadNegar',
+              'mobinpda-lab/NetworkCenterMonitor'
+            ]);
+            if (!allowed.has(target)) throw new Error(`REPOSITORY_SCOPE_DENIED:${target}`);
+            const [owner, repo] = target.split('/');
+            const ref = await github.rest.git.getRef({owner, repo, ref: 'heads/main'});
+            const observed = ref.data.object.sha;
+            if (observed !== process.env.EXPECTED_MAIN_SHA) {
+              core.setFailed(`HEAD_DRIFT expected=${process.env.EXPECTED_MAIN_SHA} observed=${observed}`);
+              return;
+            }
+            core.notice(`APP_INSTALLATION_ACCESS=CONFIRMED repository=${target}`);
+            core.notice(`EXACT_MAIN_HEAD=CONFIRMED sha=${observed}`);
