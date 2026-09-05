@@ -18,9 +18,10 @@ jobs:
     if: github.event.label.name == 'factory:queued' && github.event.issue.pull_request == null
     runs-on: ubuntu-latest
     steps:
-      - name: Acquire GitHub-authoritative lease
+      - name: Acquire GitHub-authoritative lease and resolve registered client task
         uses: actions/github-script@v7
         with:
+          github-token: ${{ github.token }}
           script: |
             const issue = context.payload.issue;
             const owner = context.repo.owner;
@@ -33,10 +34,54 @@ jobs:
               core.info(`Existing lease marker found for #${issue.number}; refusing duplicate lease.`);
               return;
             }
+
+            const clientRepoMatch = issue.body?.match(/CLIENT_REPOSITORY:\s*([^\s\n]+)/i);
+            const clientIssueMatch = issue.body?.match(/CLIENT_ISSUE:\s*(\d+)/i);
+            if (!clientRepoMatch || !clientIssueMatch) {
+              core.setFailed('NIRA_BLOCKED=MISSING_REGISTERED_CLIENT_TASK_METADATA');
+              return;
+            }
+            const clientRepository = clientRepoMatch[1];
+            const clientIssue = Number(clientIssueMatch[1]);
+            const allowed = new Set([
+              'mobinpda-lab/ASF-Core',
+              'mobinpda-lab/Arvin-clean',
+              'mobinpda-lab/YadNegar',
+              'mobinpda-lab/NetworkCenterMonitor'
+            ]);
+            if (!allowed.has(clientRepository)) throw new Error(`REPOSITORY_SCOPE_DENIED:${clientRepository}`);
+
+            const [clientOwner, clientRepo] = clientRepository.split('/');
+            const mainRef = await github.rest.git.getRef({owner: clientOwner, repo: clientRepo, ref: 'heads/main'});
+            const expectedMainSha = mainRef.data.object.sha;
+            const workerId = `nira-worker-${issue.number}-${context.runId}`;
+            const leaseId = `nira-lease-${issue.number}-${context.runId}`;
+            const fenceToken = String(context.runId);
+
             await github.rest.issues.removeLabel({owner, repo, issue_number: issue.number, name: 'factory:queued'}).catch(() => {});
             await github.rest.issues.addLabels({owner, repo, issue_number: issue.number, labels: ['factory:leased']});
             await github.rest.issues.createComment({
               owner, repo, issue_number: issue.number,
-              body: `<!-- nira-lease-v1 -->\nNIRA_LEASE=ACQUIRED\nISSUE=${issue.number}\nWORKER_IDENTITY=${context.actor}\nLEASE_RUN_ID=${context.runId}\nLEASE_SHA=${context.sha}\nLEASE_TTL_SECONDS=300\nHEARTBEAT_SECONDS=60`
+              body: `<!-- nira-lease-v1 -->\nNIRA_LEASE=ACQUIRED\nISSUE=${issue.number}\nCLIENT_REPOSITORY=${clientRepository}\nCLIENT_ISSUE=${clientIssue}\nWORKER_IDENTITY=${workerId}\nLEASE_ID=${leaseId}\nFENCE_TOKEN=${fenceToken}\nLEASE_RUN_ID=${context.runId}\nLEASE_SHA=${context.sha}\nEXPECTED_CLIENT_MAIN_SHA=${expectedMainSha}\nLEASE_TTL_SECONDS=300\nHEARTBEAT_SECONDS=60`
             });
-            core.notice(`LEASE_ACQUIRED issue=${issue.number} worker_identity=${context.actor} run=${context.runId}`);
+
+            await github.rest.actions.createWorkflowDispatch({
+              owner,
+              repo,
+              workflow_id: 'nira-cross-repo-worker.yml',
+              ref: context.ref.replace('refs/heads/', ''),
+              inputs: {
+                repository: clientRepository,
+                issue_number: String(clientIssue),
+                expected_main_sha: expectedMainSha,
+                worker_id: workerId,
+                lease_id: leaseId,
+                fence_token: fenceToken
+              }
+            });
+            core.notice(`NIRA_LEASE=ACQUIRED issue=${issue.number}`);
+            core.notice(`NIRA_CLIENT=${clientRepository}#${clientIssue}`);
+            core.notice(`NIRA_EXPECTED_CLIENT_MAIN_SHA=${expectedMainSha}`);
+            core.notice(`NIRA_WORKER=${workerId}`);
+            core.notice(`NIRA_FENCE_TOKEN=${fenceToken}`);
+            core.notice('NIRA_WORKER_DISPATCH=REQUESTED');
