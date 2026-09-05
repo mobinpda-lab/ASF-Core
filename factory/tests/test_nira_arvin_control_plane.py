@@ -31,10 +31,11 @@ def test_control_plane_owns_queue_and_lease_and_adapter_has_no_authority():
     adapter = ArvinClientAdapter()
     cp = NIRAControlPlane(adapter)
     task = make_task()
+    now = datetime(2026, 9, 5, tzinfo=timezone.utc)
     cp.intake(task)
-    lease = cp.lease(task, "worker-1", datetime(2026, 9, 5, tzinfo=timezone.utc))
+    lease = cp.lease(task, "worker-1", now)
     assert lease.task_id == task.task_id
-    assert validate_lease(lease, "worker-1", lease.fence_token).value == "ACCEPT"
+    assert validate_lease(lease, "worker-1", lease.fence_token, now).value == "ACCEPT"
     assert not hasattr(adapter, "merge")
     assert not hasattr(adapter, "promote")
     assert not hasattr(adapter, "enqueue")
