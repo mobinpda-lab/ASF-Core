@@ -64,7 +64,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git grep -n -E 'ASF_MOC|ASF-MOC|ASF_FACTORY|ASF_CORE|ASF MOC' -- ':!docs/migration/provenance/**'; then
+          if git grep -n -E 'ASF_MOC|ASF-MOC|ASF_FACTORY|ASF_CORE|ASF MOC' -- ':!docs/migration/provenance/**' ':!.github/workflows/factory-conformance.yml'; then
             echo 'LEGACY_FACTORY_BRANDING_FOUND'
             exit 1
           fi
