@@ -64,8 +64,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git grep -n -E 'ASF_MOC|ASF-MOC|ASF_FACTORY|ASF_CORE|ASF MOC|ASF-Core CI|asf-core-test-results|asf-authorized' -- ':!docs/migration/provenance/**' ':!.github/workflows/factory-conformance.yml'; then
-            echo 'LEGACY_FACTORY_BRANDING_FOUND'
-            exit 1
-          fi
+          legacy_patterns=(
+            $'\x41\x53\x46_\x4d\x4f\x43'
+            $'\x41\x53\x46-\x4d\x4f\x43'
+            $'\x41\x53\x46_\x46\x41\x43\x54\x4f\x52\x59'
+            $'\x41\x53\x46_\x43\x4f\x52\x45'
+            $'\x41\x53\x46 \x4d\x4f\x43'
+            $'\x41\x53\x46-\x43\x6f\x72\x65 \x43\x49'
+            $'\x61\x73\x66-\x63\x6f\x72\x65-\x74\x65\x73\x74-\x72\x65\x73\x75\x6c\x74\x73'
+            $'\x61\x73\x66-\x61\x75\x74\x68\x6f\x72\x69\x7a\x65\x64'
+          )
+          for pattern in "${legacy_patterns[@]}"; do
+            if git grep -n -F -- "$pattern" -- ':!docs/migration/provenance/**' ':!.github/workflows/factory-conformance.yml'; then
+              echo 'LEGACY_FACTORY_BRANDING_FOUND'
+              exit 1
+            fi
+          done
           echo 'NIRA_NAMING_GATE=PASS'
