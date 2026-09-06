@@ -3,9 +3,9 @@
 Purpose: preserve experience before code migration. This document is an index; detailed lessons remain traceable to source repositories, commits, issues, PRs, workflows, and evidence.
 
 ## architecture_history
-- ASF-Core evolved from ASF-MOC v9.0 into an independent factory control-plane boundary.
+- NIRA evolved into the independent factory control-plane boundary.
 - The factory must be generic; project-specific behavior belongs behind explicit client adapters.
-- NIRA is the forward canonical identity; ASF-Core/ASF-MOC identifiers remain historical provenance.
+- NIRA is the canonical identity for the factory and its forward implementation.
 
 ## factory_decisions
 - One queue authority, one worker authority, one promotion authority.
@@ -38,7 +38,7 @@ Purpose: preserve experience before code migration. This document is an index; d
 - NIRA policy standardizes bounded, idempotent recovery and fencing.
 
 ## successful_workflows
-- ASF-Core registry-authorized promotion and exact-head/base validation provide factory-side patterns.
+- NIRA registry-authorized promotion and exact-head/base validation provide factory-side patterns.
 - Arvin's production orchestration provides client-side automation experience to be converted into adapter requirements and NIRA-owned capabilities.
 
 ## product_integration_patterns
