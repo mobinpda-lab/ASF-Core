@@ -15,7 +15,7 @@ projects:
       base: main
     pr_policy:
       base: main
-      required_label: asf-authorized
+      required_label: nira-authorized
     ci_contract:
       required_workflow: NIRA CI
     required_checks:
@@ -63,7 +63,7 @@ projects:
       base: main
     pr_policy:
       base: main
-      required_label: asf-authorized
+      required_label: nira-authorized
     ci_contract:
       required_workflow: NIRA CI
     required_checks:
@@ -111,7 +111,7 @@ projects:
       base: main
     pr_policy:
       base: main
-      required_label: asf-authorized
+      required_label: nira-authorized
     ci_contract:
       required_workflow: NIRA CI
     required_checks:
