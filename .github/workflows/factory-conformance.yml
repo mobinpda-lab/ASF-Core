@@ -80,7 +80,7 @@ jobs:
               ''.join(chr(x) for x in (97,115,102,45,97,117,116,104,111,114,105,122,101,100)),
           ]
           allowed_provider_slug = 'mobinpda-lab/ASF-Core'
-          audit_path = Path('.nira-naming-audit.txt')
+          audit_path = Path('nira-naming-audit.txt')
           files = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
           matches = []
           for name in files:
@@ -107,5 +107,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nira-naming-audit
-          path: .nira-naming-audit.txt
+          path: nira-naming-audit.txt
           if-no-files-found: error
