@@ -1,4 +1,4 @@
-name: ASF-Core Factory Conformance
+name: NIRA Factory Conformance
 
 on:
   push:
@@ -38,9 +38,9 @@ jobs:
           python-version: '3.12'
       - name: Install test tooling
         run: python -m pip install --disable-pip-version-check pytest
-      - name: Run factory contract tests
+      - name: Run NIRA factory contract tests
         run: python -m pytest -q factory/tests
-      - name: Fail closed on missing canonical surfaces
+      - name: Fail closed on missing canonical NIRA surfaces
         shell: bash
         run: |
           set -euo pipefail
@@ -54,9 +54,9 @@ jobs:
             factory/registry/promotion-policy.json
           )
           for path in "${required[@]}"; do
-            test -f "$path" || { echo "MISSING_CANONICAL_SURFACE=$path"; exit 1; }
+            test -f "$path" || { echo "MISSING_NIRA_CANONICAL_SURFACE=$path"; exit 1; }
           done
           jq -e '.schema_version == "1.0" and .promotion.enabled == true and (.promotion.max_candidates_per_cycle >= 1)' factory/registry/promotion-policy.json >/dev/null
           grep -q 'L10' README.md || {
-            echo 'L10 status must remain explicit until authentic E2E evidence exists'; exit 1;
+            echo 'NIRA L10 status must remain explicit until authentic E2E evidence exists'; exit 1;
           }
