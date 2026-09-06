@@ -1,4 +1,4 @@
-name: ASF-Core CI
+name: NIRA CI
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Validate factory control-plane contract
+      - name: Validate NIRA control-plane contract
         env:
           PYTHONPATH: .
         run: |
@@ -60,6 +60,8 @@ jobs:
               'orchestrator_squash_merge': 'pulls/$pr/merge' in orch and 'merge_method:"squash"' in orch,
               'orchestrator_exact_main_verification': 'main postcondition mismatch' in orch and 'new_main' in orch,
               'registry_policy_valid': policy.get('schema_version') == '1.0' and promotion.get('enabled') is True,
+              'registry_nira_workflow': promotion.get('required_workflow') == 'NIRA CI',
+              'registry_nira_artifact': promotion.get('required_artifact') == 'nira-test-results',
           }
           checks.extend(contract_checks.items())
 
@@ -67,16 +69,16 @@ jobs:
           if failed:
               raise SystemExit('Contract validation failed: ' + ', '.join(failed))
 
-          suite = ET.Element('testsuite', name='ASF-Core control-plane contract', tests=str(len(checks)), failures='0')
+          suite = ET.Element('testsuite', name='NIRA control-plane contract', tests=str(len(checks)), failures='0')
           for name, _ in checks:
               ET.SubElement(suite, 'testcase', name=name)
           ET.ElementTree(suite).write('test-results.xml', encoding='utf-8', xml_declaration=True)
-          print(f'Validated {len(checks)} control-plane contract checks.')
+          print(f'Validated {len(checks)} NIRA control-plane contract checks.')
           PY
-      - name: Upload authentic test evidence
+      - name: Upload authentic NIRA test evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: asf-core-test-results
+          name: nira-test-results
           path: test-results.xml
           if-no-files-found: error
