@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "promotion": {
     "enabled": true,
-    "required_label": "asf-authorized",
+    "required_label": "nira-authorized",
     "head_branch_prefix": "factory/",
     "required_workflow": "NIRA CI",
     "required_artifact": "nira-test-results",
