@@ -1,21 +1,20 @@
-# ASF-MOC Independent Factory Architecture
+# NIRA Independent Factory Architecture
 
 **Status:** Canonical architectural decision  
-**Applies to:** ASF-MOC v9.0 / L10 Autonomous Software Production  
-**Repository:** `mobinpda-lab/ASF-Core`  
-**Issue:** #11  
-**Date:** 2026-09-04
+**Applies to:** NIRA autonomous software factory  
+**Repository:** `mobinpda-lab/ASF-Core` (current GitHub repository slug retained for compatibility)  
+**Issue:** #11
 
 ## 1. Purpose
 
-This document establishes the ownership boundary between the autonomous software factory (**ASF-MOC**) and the software products it operates.
+This document establishes the ownership boundary between **NIRA** and the software products it operates.
 
-The factory is an independent system. Product repositories are workloads/clients of the factory, not containers of the factory core.
+NIRA is an independent system. Product repositories are workloads/clients of NIRA, not containers of the factory core.
 
 ## 2. Canonical topology
 
 ```text
-                         ASF-MOC / ASF-Core
+                         NIRA / ASF-Core
                     Independent Factory System
                               |
                     +---------+---------+
@@ -32,7 +31,7 @@ The factory is an independent system. Product repositories are workloads/clients
 
 ### Factory
 
-**ASF-MOC / ASF-Core** owns:
+**NIRA** owns:
 
 - governance and execution policy
 - Project Registry
@@ -55,25 +54,25 @@ The following remain independent projects:
 - **YadNegar** — product/workload/client
 - **NetworkCenterMonitor** — product/workload/client
 
-A product may expose an observer, dashboard, adapter, webhook, or other integration for ASF-MOC. Such integration does not transfer factory ownership to the product.
+A product may expose an observer, dashboard, adapter, webhook, or other integration for NIRA. Such integration does not transfer factory ownership to the product.
 
 ## 3. NetworkCenterMonitor boundary
 
-NetworkCenterMonitor is **not** ASF-MOC and must not become a second factory.
+NetworkCenterMonitor is **not NIRA** and must not become a second factory.
 
-Factory-related workflows or control-plane mechanisms previously introduced into NetworkCenterMonitor are classified as **provisional/legacy factory integration** until they are audited.
+Factory-related workflows or control-plane mechanisms previously introduced into NetworkCenterMonitor are classified as provisional/legacy factory integration until audited.
 
 For each such component, the target state is one of:
 
-1. **Re-home into ASF-Core** when it is factory-core functionality.
-2. **Reduce to a product-side adapter/integration** when the product genuinely needs to communicate with ASF-MOC.
-3. **Remove** when it duplicates factory responsibility without a valid product integration purpose.
+1. Re-home into NIRA when it is factory-core functionality.
+2. Reduce to a product-side adapter/integration when the product genuinely needs to communicate with NIRA.
+3. Remove when it duplicates factory responsibility without a valid product integration purpose.
 
-No product repository is an authoritative source for ASF-MOC core behavior.
+No product repository is an authoritative source for NIRA core behavior.
 
 ## 4. Product Registry contract
 
-ASF-MOC must manage products through an explicit registry/contract rather than repository ownership coupling.
+NIRA must manage products through an explicit registry/contract rather than repository ownership coupling.
 
 A registered project should have, at minimum:
 
@@ -118,13 +117,13 @@ IDEA
   -> NEXT TASK
 ```
 
-This lifecycle belongs to ASF-MOC. A product repository only supplies the workload and its project-specific execution surface.
+This lifecycle belongs to NIRA. A product repository only supplies the workload and its project-specific execution surface.
 
 ## 6. Evidence and L10 rule
 
-A product repository containing an autonomous workflow is not, by itself, evidence that ASF-MOC has achieved L10.
+A product repository containing an autonomous workflow is not, by itself, evidence that NIRA has achieved L10.
 
-**L10 may be claimed only after the independent ASF-MOC system demonstrates authentic end-to-end evidence across registered client projects.**
+**L10 may be claimed only after the independent NIRA system demonstrates authentic end-to-end evidence across registered client projects.**
 
 Required evidence must establish, as applicable:
 
@@ -147,16 +146,16 @@ All operational reports must separate factory state from product state.
 
 Canonical top-level sections:
 
-1. **ASF-MOC** — factory capability, runtime, queue, workers, evidence, gates, recovery, releases, and L10 status.
+1. **NIRA** — factory capability, runtime, queue, workers, evidence, gates, recovery, releases, and L10 status.
 2. **Arvin** — product implementation and product CI/release status.
 3. **YadNegar** — product implementation and product CI/release status.
 4. **NetworkCenterMonitor** — product implementation and product CI/release status, plus any explicitly identified observer/integration status.
 
-Factory progress must never be presented as product progress, and product progress must never be presented as ASF-MOC progress.
+Factory progress must never be presented as product progress, and product progress must never be presented as NIRA progress.
 
 ## 8. Governance
 
-All ASF-MOC core changes follow the governed path:
+All NIRA core changes follow the governed path:
 
 ```text
 Issue -> dedicated branch -> implementation -> CI/gates -> PR -> review/promotion -> main
@@ -166,10 +165,12 @@ No direct main modification is authorized merely because a change is architectur
 
 ## 9. Architectural decision
 
-This document supersedes any earlier interpretation in which NetworkCenterMonitor, Arvin, or YadNegar was described as the factory/control plane itself.
+This document supersedes earlier naming in which the factory was described by legacy internal identifiers.
 
 The canonical model is:
 
-> **ASF-MOC is the factory. Products are independent clients/workloads.**
+> **NIRA is the factory. Products are independent clients/workloads.**
+
+The GitHub repository slug `ASF-Core` is retained only as the current repository identifier for compatibility, links, provenance, and history.
 
 This boundary is mandatory for future implementation, reporting, documentation, automation, and L10 claims.

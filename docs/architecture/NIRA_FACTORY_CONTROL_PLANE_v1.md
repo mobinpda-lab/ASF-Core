@@ -1,12 +1,12 @@
-# ASF Factory Control Plane v1
+# NIRA Factory Control Plane v1
 
-**Status:** Canonical implementation contract
-**Scope:** ASF-Core only
-**Date:** 2026-09-04
+**Status:** Canonical implementation contract  
+**Scope:** NIRA only  
+**Repository:** `mobinpda-lab/ASF-Core` (current GitHub repository slug; official factory name is NIRA)
 
 ## Objective
 
-ASF-Core is an independent autonomous software factory control plane. It operates registered repositories through explicit contracts and adapters. Product repositories never become the source of truth for factory behavior.
+NIRA is an independent autonomous software factory control plane. It operates registered repositories through explicit contracts and adapters. Product repositories never become the source of truth for factory behavior.
 
 ## Control-plane domains
 
@@ -66,10 +66,10 @@ Default operational policy is a five-minute lease TTL, sixty-second heartbeat, a
 
 ## Project boundary
 
-Arvin-clean, YadNegar and NetworkCenterMonitor are clients/workloads. Their product code, product-specific workflows and domain logic do not belong in ASF-Core. Product-side integrations must use an adapter contract.
+Arvin-clean, YadNegar and NetworkCenterMonitor are clients/workloads. Their product code, product-specific workflows and domain logic do not belong in NIRA. Product-side integrations must use an adapter contract.
 
 ## L10 completion definition
 
 L10 is not a file-count or workflow-count metric. It requires authentic, reconstructible evidence of a real registered project task completing the complete factory lifecycle, including failure/fencing/recovery behavior, without synthetic passes or manual promotion.
 
-Until that evidence exists, ASF-Core must report `L10_UNVERIFIED`.
+Until that evidence exists, NIRA must report `L10_UNVERIFIED`.
