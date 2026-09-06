@@ -1,9 +1,9 @@
-name: ASF-Core Production Orchestrator
+name: NIRA Production Orchestrator
 
 on:
   workflow_dispatch:
   push:
-    branches: ['factory/independent-control-plane-hardening-20260904', 'factory/github-app-runtime-20260904', 'main']
+    branches: [main]
   schedule:
     - cron: '*/5 * * * *'
 
@@ -14,17 +14,17 @@ permissions:
   issues: read
 
 concurrency:
-  group: asf-core-production-promotion
+  group: nira-production-promotion
   cancel-in-progress: false
 
 env:
   REPO: ${{ github.repository }}
   POLICY: factory/registry/promotion-policy.json
-  ASF_INSTALLATION_ID: '153019703'
+  NIRA_INSTALLATION_ID: '153019703'
 
 jobs:
   promote:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/factory/independent-control-plane-hardening-20260904' || github.ref == 'refs/heads/factory/github-app-runtime-20260904'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact ref
@@ -37,8 +37,8 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ secrets.ASF_MOC_APP_ID }}
-          private-key: ${{ secrets.ASF_MOC_APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.NIRA_GITHUB_APP_ID }}
+          private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
           owner: mobinpda-lab
           repositories: ASF-Core,Arvin-clean,YadNegar,NetworkCenterMonitor
 
@@ -89,7 +89,7 @@ jobs:
             [[ "$(jq -r '.head.sha' <<<"$pr_now")" == "$head" ]] || { echo "BLOCK PR#$pr HEAD_DRIFT during validation"; exit 1; }
 
             echo "READY PR#$pr head=$head base=$base_sha run=$run_id artifact=$required_artifact main=$current_main"
-            payload=$(jq -n --arg sha "$head" --arg title "promote(asf-core): PR#$pr registry-authorized promotion" --arg message "ASF-MOC v9.0 registry-authorized promotion: exact HEAD/base, authentic CI, artifact evidence, fail-closed validation." '{sha:$sha,merge_method:"squash",commit_title:$title,commit_message:$message}')
+            payload=$(jq -n --arg sha "$head" --arg title "promote(nira): PR#$pr registry-authorized promotion" --arg message "NIRA registry-authorized promotion: exact HEAD/base, authentic CI, artifact evidence, fail-closed validation." '{sha:$sha,merge_method:"squash",commit_title:$title,commit_message:$message}')
             response=$(curl --fail-with-body -sS -X PUT -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $GH_TOKEN" -H "X-GitHub-Api-Version: 2022-11-28" -H "Content-Type: application/json" "https://api.github.com/repos/$repo/pulls/$pr/merge" -d "$payload")
             [[ "$(jq -r '.merged // false' <<<"$response")" == "true" ]] || { echo "BLOCK PR#$pr merge API did not confirm merged=true"; exit 1; }
 
