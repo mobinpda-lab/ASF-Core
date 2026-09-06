@@ -17,14 +17,14 @@ projects:
       base: main
       required_label: asf-authorized
     ci_contract:
-      required_workflow: ASF-Core CI
+      required_workflow: NIRA CI
     required_checks:
-      - ASF-Core CI
+      - NIRA CI
     security_gates:
       - exact_head
       - exact_base
     artifact_requirements:
-      - asf-core-test-results
+      - nira-test-results
     promotion_policy:
       enabled: true
       authorization: nira
@@ -65,17 +65,17 @@ projects:
       base: main
       required_label: asf-authorized
     ci_contract:
-      required_workflow: ASF-Core CI
+      required_workflow: NIRA CI
     required_checks:
-      - ASF-Core CI
+      - NIRA CI
     security_gates:
       - exact_head
       - exact_base
     artifact_requirements:
-      - asf-core-test-results
+      - nira-test-results
     promotion_policy:
       enabled: true
-      authorization: asf-authorized
+      authorization: nira
       require_exact_head: true
       require_exact_base: true
     release_policy:
@@ -113,17 +113,17 @@ projects:
       base: main
       required_label: asf-authorized
     ci_contract:
-      required_workflow: ASF-Core CI
+      required_workflow: NIRA CI
     required_checks:
-      - ASF-Core CI
+      - NIRA CI
     security_gates:
       - exact_head
       - exact_base
     artifact_requirements:
-      - asf-core-test-results
+      - nira-test-results
     promotion_policy:
       enabled: true
-      authorization: asf-authorized
+      authorization: nira
       require_exact_head: true
       require_exact_base: true
     release_policy:
