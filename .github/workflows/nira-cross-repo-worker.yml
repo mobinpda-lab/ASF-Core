@@ -22,6 +22,10 @@ on:
         description: 'NIRA lease identifier'
         required: true
         type: string
+      fence_token:
+        description: 'Positive NIRA fencing token for this lease'
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -40,18 +44,24 @@ jobs:
           ISSUE_NUMBER: ${{ inputs.issue_number }}
           WORKER_ID: ${{ inputs.worker_id }}
           LEASE_ID: ${{ inputs.lease_id }}
+          FENCE_TOKEN: ${{ inputs.fence_token }}
           EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
         run: |
           set -euo pipefail
           test -n "$WORKER_ID"
           test -n "$LEASE_ID"
           test "$ISSUE_NUMBER" -gt 0
-          test "$CLIENT_REPOSITORY" = "mobinpda-lab/ASF-Core" || test "$CLIENT_REPOSITORY" = "mobinpda-lab/Arvin-clean" || test "$CLIENT_REPOSITORY" = "mobinpda-lab/YadNegar" || test "$CLIENT_REPOSITORY" = "mobinpda-lab/NetworkCenterMonitor"
+          test "$FENCE_TOKEN" -gt 0
+          case "$CLIENT_REPOSITORY" in
+            mobinpda-lab/ASF-Core|mobinpda-lab/Arvin-clean|mobinpda-lab/YadNegar|mobinpda-lab/NetworkCenterMonitor) ;;
+            *) echo 'NIRA_FENCING=REJECTED_REPOSITORY' >&2; exit 1 ;;
+          esac
           test "${#EXPECTED_MAIN_SHA}" -eq 40
           echo "NIRA_WORKER_ID=$WORKER_ID"
           echo "NIRA_LEASE_ID=$LEASE_ID"
+          echo "NIRA_FENCE_TOKEN=$FENCE_TOKEN"
           echo "NIRA_CLIENT_REPOSITORY=$CLIENT_REPOSITORY"
-      - name: Fail closed when GitHub App binding is unavailable
+      - name: Create GitHub App installation token
         id: app_token
         uses: actions/create-github-app-token@v2
         with:
@@ -59,26 +69,92 @@ jobs:
           private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
           owner: mobinpda-lab
           repositories: ASF-Core,Arvin-clean,YadNegar,NetworkCenterMonitor
-      - name: Validate exact client HEAD with App identity
+      - name: Validate exact client HEAD and perform bounded client execution
+        id: execute
         uses: actions/github-script@v7
         env:
           GH_APP_TOKEN: ${{ steps.app_token.outputs.token }}
           CLIENT_REPOSITORY: ${{ inputs.repository }}
           EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          WORKER_ID: ${{ inputs.worker_id }}
+          LEASE_ID: ${{ inputs.lease_id }}
+          FENCE_TOKEN: ${{ inputs.fence_token }}
         with:
           github-token: ${{ steps.app_token.outputs.token }}
           script: |
             const [owner, repo] = process.env.CLIENT_REPOSITORY.split('/');
             if (!owner || !repo) throw new Error('INVALID_CLIENT_REPOSITORY');
-            const ref = await github.rest.git.getRef({ owner, repo, ref: 'heads/main' });
-            const observed = ref.data.object.sha;
+            if (!/^\d+$/.test(process.env.FENCE_TOKEN) || Number(process.env.FENCE_TOKEN) <= 0) throw new Error('INVALID_FENCE_TOKEN');
+            const mainRef = await github.rest.git.getRef({ owner, repo, ref: 'heads/main' });
+            const observed = mainRef.data.object.sha;
             if (observed !== process.env.EXPECTED_MAIN_SHA) {
               core.setFailed(`NIRA_FENCING=HEAD_DRIFT expected=${process.env.EXPECTED_MAIN_SHA} observed=${observed}`);
               return;
             }
             core.notice(`NIRA_IDENTITY=GITHUB_APP_INSTALLATION_TOKEN`);
             core.notice(`NIRA_FENCING=EXACT_HEAD_CONFIRMED sha=${observed}`);
-      - name: Record execution boundary
+            const suffix = `${process.env.ISSUE_NUMBER}-${process.env.WORKER_ID}`.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80);
+            const branch = `nira/worker-${suffix}`;
+            const proofPath = `.nira/execution/${process.env.ISSUE_NUMBER}-${process.env.FENCE_TOKEN}.md`;
+            const proof = [
+              '# NIRA Execution Proof',
+              '',
+              `- worker_id: ${process.env.WORKER_ID}`,
+              `- lease_id: ${process.env.LEASE_ID}`,
+              `- fence_token: ${process.env.FENCE_TOKEN}`,
+              `- issue: ${process.env.ISSUE_NUMBER}`,
+              `- leased_main_sha: ${process.env.EXPECTED_MAIN_SHA}`,
+              `- execution_identity: github_app_installation_token`,
+              `- execution_boundary: ${new Date().toISOString()}`,
+              '',
+              'This bounded file is an NIRA execution artifact. It contains no product logic and grants no promotion authority.'
+            ].join('\n');
+            try {
+              await github.rest.git.getRef({ owner, repo, ref: `heads/${branch}` });
+              throw new Error('DUPLICATE_EXECUTION_BRANCH');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            await github.rest.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: observed });
+            await github.rest.repos.createOrUpdateFileContents({
+              owner,
+              repo,
+              path: proofPath,
+              message: `chore(nira): record bounded execution proof for issue #${process.env.ISSUE_NUMBER}`,
+              content: Buffer.from(proof, 'utf8').toString('base64'),
+              branch,
+              committer: { name: 'NIRA Factory Worker', email: 'nira-factory@users.noreply.github.com' },
+              author: { name: 'NIRA Factory Worker', email: 'nira-factory@users.noreply.github.com' }
+            });
+            const pr = await github.rest.pulls.create({
+              owner,
+              repo,
+              title: `chore(nira): bounded execution proof #${process.env.ISSUE_NUMBER}`,
+              head: branch,
+              base: 'main',
+              body: [
+                '## NIRA real execution artifact',
+                '',
+                `- NIRA issue: #${process.env.ISSUE_NUMBER}`,
+                `- Worker: ${process.env.WORKER_ID}`,
+                `- Lease: ${process.env.LEASE_ID}`,
+                `- Fence: ${process.env.FENCE_TOKEN}`,
+                `- Exact leased main SHA: ${process.env.EXPECTED_MAIN_SHA}`,
+                '',
+                'This PR is intentionally bounded and non-product: it records the execution boundary only. NIRA has no merge/promotion authority.'
+              ].join('\n'),
+              draft: true,
+              maintainer_can_modify: false
+            });
+            core.setOutput('branch', branch);
+            core.setOutput('commit_sha', pr.data.head.sha);
+            core.setOutput('pr_number', pr.data.number);
+            core.notice(`NIRA_BRANCH=${branch}`);
+            core.notice(`NIRA_COMMIT=${pr.data.head.sha}`);
+            core.notice(`NIRA_PR=${pr.data.number}`);
+      - name: Record execution-boundary evidence
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
@@ -91,11 +167,15 @@ jobs:
             echo "NIRA_EXPECTED_MAIN_SHA=${{ inputs.expected_main_sha }}"
             echo "NIRA_WORKER_ID=${{ inputs.worker_id }}"
             echo "NIRA_LEASE_ID=${{ inputs.lease_id }}"
+            echo "NIRA_FENCE_TOKEN=${{ inputs.fence_token }}"
+            echo "NIRA_BRANCH=${{ steps.execute.outputs.branch }}"
+            echo "NIRA_COMMIT=${{ steps.execute.outputs.commit_sha }}"
+            echo "NIRA_PR=${{ steps.execute.outputs.pr_number }}"
           } | tee nira-worker-evidence.txt
-      - name: Upload execution boundary evidence
+      - name: Upload execution evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nira-worker-boundary-${{ inputs.issue_number }}
+          name: nira-worker-boundary-${{ inputs.issue_number }}-${{ inputs.fence_token }}
           path: nira-worker-evidence.txt
           if-no-files-found: error
