@@ -66,7 +66,9 @@ jobs:
         id: app_token
         uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ secrets.NIRA_GITHUB_APP_ID }}
+          # GitHub App JWT `iss` must be numeric. fromJSON converts a numeric
+          # repository secret into a JSON number before it reaches the action.
+          app-id: ${{ fromJSON(secrets.NIRA_GITHUB_APP_ID) }}
           private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
           owner: mobinpda-lab
           repositories: ASF-Core,Arvin-clean,YadNegar,NetworkCenterMonitor
@@ -98,16 +100,14 @@ jobs:
             const branch = `nira/worker-${suffix}`;
             const proofPath = `.nira/execution/${process.env.ISSUE_NUMBER}-${process.env.FENCE_TOKEN}.md`;
             const proof = [
-              '# NIRA Execution Proof',
-              '',
+              '# NIRA Execution Proof', '',
               `- worker_id: ${process.env.WORKER_ID}`,
               `- lease_id: ${process.env.LEASE_ID}`,
               `- fence_token: ${process.env.FENCE_TOKEN}`,
               `- issue: ${process.env.ISSUE_NUMBER}`,
               `- leased_main_sha: ${process.env.EXPECTED_MAIN_SHA}`,
               `- execution_identity: github_app_installation_token`,
-              `- execution_boundary: ${new Date().toISOString()}`,
-              '',
+              `- execution_boundary: ${new Date().toISOString()}`, '',
               'This bounded file is an NIRA execution artifact. It contains no product logic and grants no promotion authority.'
             ].join('\n');
             try {
@@ -118,34 +118,25 @@ jobs:
             }
             await github.rest.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: observed });
             await github.rest.repos.createOrUpdateFileContents({
-              owner,
-              repo,
-              path: proofPath,
+              owner, repo, path: proofPath,
               message: `chore(nira): record bounded execution proof for issue #${process.env.ISSUE_NUMBER}`,
-              content: Buffer.from(proof, 'utf8').toString('base64'),
-              branch,
+              content: Buffer.from(proof, 'utf8').toString('base64'), branch,
               committer: { name: 'NIRA Factory Worker', email: 'nira-factory@users.noreply.github.com' },
               author: { name: 'NIRA Factory Worker', email: 'nira-factory@users.noreply.github.com' }
             });
             const pr = await github.rest.pulls.create({
-              owner,
-              repo,
+              owner, repo,
               title: `chore(nira): bounded execution proof #${process.env.ISSUE_NUMBER}`,
-              head: branch,
-              base: 'main',
+              head: branch, base: 'main', draft: true, maintainer_can_modify: false,
               body: [
-                '## NIRA real execution artifact',
-                '',
+                '## NIRA real execution artifact', '',
                 `- NIRA issue: #${process.env.ISSUE_NUMBER}`,
                 `- Worker: ${process.env.WORKER_ID}`,
                 `- Lease: ${process.env.LEASE_ID}`,
                 `- Fence: ${process.env.FENCE_TOKEN}`,
-                `- Exact leased main SHA: ${process.env.EXPECTED_MAIN_SHA}`,
-                '',
+                `- Exact leased main SHA: ${process.env.EXPECTED_MAIN_SHA}`, '',
                 'This PR is intentionally bounded and non-product: it records the execution boundary only. NIRA has no merge/promotion authority.'
-              ].join('\n'),
-              draft: true,
-              maintainer_can_modify: false
+              ].join('\n')
             });
             core.setOutput('branch', branch);
             core.setOutput('commit_sha', pr.data.head.sha);
