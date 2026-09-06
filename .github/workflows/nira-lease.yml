@@ -3,6 +3,7 @@ name: NIRA Lease
 on:
   issues:
     types: [labeled]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -10,12 +11,12 @@ permissions:
   actions: write
 
 concurrency:
-  group: nira-lease-${{ github.event.issue.number }}
+  group: nira-lease-${{ github.event.issue.number || 'manual' }}
   cancel-in-progress: false
 
 jobs:
   lease:
-    if: github.event.label.name == 'factory:queued' && github.event.issue.pull_request == null
+    if: github.event_name == 'workflow_dispatch' || (github.event.label.name == 'factory:queued' && github.event.issue.pull_request == null)
     runs-on: ubuntu-latest
     steps:
       - name: Acquire GitHub-authoritative lease and resolve registered client task
@@ -24,14 +25,38 @@ jobs:
           github-token: ${{ github.token }}
           script: |
             const issue = context.payload.issue;
+            if (!issue) {
+              core.info('Manual invocation: no issue payload; no queue mutation performed.');
+              return;
+            }
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner, repo, issue_number: issue.number, per_page: 100
             });
-            const activeLease = comments.some(c => c.body && c.body.includes('<!-- nira-lease-v1 -->') && !c.body.includes('NIRA_LEASE=EXPIRED'));
+
+            const leaseComments = comments.filter(c => c.body && c.body.includes('<!-- nira-lease-v1 -->'));
+            const now = Date.now();
+            let activeLease = false;
+            for (const comment of leaseComments) {
+              if (comment.body.includes('NIRA_LEASE=EXPIRED')) continue;
+              const ttlMatch = comment.body.match(/LEASE_TTL_SECONDS=(\d+)/i);
+              const ttlSeconds = ttlMatch ? Number(ttlMatch[1]) : 300;
+              const createdAt = comment.created_at ? Date.parse(comment.created_at) : NaN;
+              const ageSeconds = Number.isFinite(createdAt) ? (now - createdAt) / 1000 : 0;
+              if (Number.isFinite(createdAt) && ageSeconds > ttlSeconds) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: issue.number,
+                  body: `<!-- nira-lease-v1 -->\nNIRA_LEASE=EXPIRED\nEXPIRED_LEASE_COMMENT=${comment.id}\nEXPIRED_AFTER_SECONDS=${Math.floor(ageSeconds)}\nLEASE_TTL_SECONDS=${ttlSeconds}`
+                });
+                await github.rest.issues.removeLabel({owner, repo, issue_number: issue.number, name: 'factory:leased'}).catch(() => {});
+                await github.rest.issues.removeLabel({owner, repo, issue_number: issue.number, name: 'factory:in-progress'}).catch(() => {});
+                continue;
+              }
+              activeLease = true;
+            }
             if (activeLease) {
-              core.info(`Existing lease marker found for #${issue.number}; refusing duplicate lease.`);
+              core.info(`Existing active lease marker found for #${issue.number}; refusing duplicate lease.`);
               return;
             }
 
