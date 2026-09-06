@@ -60,24 +60,52 @@ jobs:
           grep -q 'L10' README.md || {
             echo 'L10 status must remain explicit until authentic E2E evidence exists'; exit 1;
           }
-      - name: Fail closed on legacy factory branding
+      - name: Audit legacy factory branding
+        id: naming_audit
         shell: bash
         run: |
           set -euo pipefail
-          legacy_patterns=(
-            $'\x41\x53\x46_\x4d\x4f\x43'
-            $'\x41\x53\x46-\x4d\x4f\x43'
-            $'\x41\x53\x46_\x46\x41\x43\x54\x4f\x52\x59'
-            $'\x41\x53\x46_\x43\x4f\x52\x45'
-            $'\x41\x53\x46 \x4d\x4f\x43'
-            $'\x41\x53\x46-\x43\x6f\x72\x65 \x43\x49'
-            $'\x61\x73\x66-\x63\x6f\x72\x65-\x74\x65\x73\x74-\x72\x65\x73\x75\x6c\x74\x73'
-            $'\x61\x73\x66-\x61\x75\x74\x68\x6f\x72\x69\x7a\x65\x64'
-          )
-          for pattern in "${legacy_patterns[@]}"; do
-            if git grep -n -F -- "$pattern" -- ':!docs/migration/provenance/**' ':!.github/workflows/factory-conformance.yml'; then
-              echo 'LEGACY_FACTORY_BRANDING_FOUND'
-              exit 1
-            fi
-          done
-          echo 'NIRA_NAMING_GATE=PASS'
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          legacy = [
+              ''.join(chr(x) for x in (65,83,70,95,77,79,67)),
+              ''.join(chr(x) for x in (65,83,70,45,77,79,67)),
+              ''.join(chr(x) for x in (65,83,70,95,70,65,67,84,79,82,89)),
+              ''.join(chr(x) for x in (65,83,70,95,67,79,82,69)),
+              ''.join(chr(x) for x in (65,83,70,32,77,79,67)),
+              ''.join(chr(x) for x in (65,83,70,45,67,111,114,101,32,67,73)),
+              ''.join(chr(x) for x in (97,115,102,45,99,111,114,101,45,116,101,115,116,45,114,101,115,117,108,116,115)),
+              ''.join(chr(x) for x in (97,115,102,45,97,117,116,104,111,114,105,122,101,100)),
+          ]
+          allowed_provider_slug = 'mobinpda-lab/ASF-Core'
+          audit_path = Path('.nira-naming-audit.txt')
+          files = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
+          matches = []
+          for name in files:
+              if not name or name == '.github/workflows/factory-conformance.yml':
+                  continue
+              try:
+                  text = Path(name).read_text(encoding='utf-8')
+              except (UnicodeDecodeError, OSError):
+                  continue
+              for lineno, line in enumerate(text.splitlines(), 1):
+                  normalized = line.replace(allowed_provider_slug, '<provider-slug>')
+                  for pattern in legacy:
+                      if pattern in normalized:
+                          matches.append(f'{name}:{lineno}: {pattern}')
+          if matches:
+              audit_path.write_text('NIRA_NAMING_GATE=FAIL\n' + '\n'.join(matches) + '\n', encoding='utf-8')
+              print(audit_path.read_text(encoding='utf-8'), end='')
+              raise SystemExit(1)
+          audit_path.write_text('NIRA_NAMING_GATE=PASS\nNo legacy factory identifiers found in active tracked text files.\n', encoding='utf-8')
+          print(audit_path.read_text(encoding='utf-8'), end='')
+          PY
+      - name: Upload naming audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nira-naming-audit
+          path: .nira-naming-audit.txt
+          if-no-files-found: error
