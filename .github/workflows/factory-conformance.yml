@@ -1,8 +1,8 @@
-name: ASF-Core Factory Conformance
+name: NIRA Factory Conformance
 
 on:
   push:
-    branches: [main, 'factory/**']
+    branches: [main, 'nira/**']
     paths:
       - 'factory/**'
       - 'docs/architecture/**'
@@ -60,3 +60,12 @@ jobs:
           grep -q 'L10' README.md || {
             echo 'L10 status must remain explicit until authentic E2E evidence exists'; exit 1;
           }
+      - name: Fail closed on legacy factory branding
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -n -E 'ASF_MOC|ASF-MOC|ASF_FACTORY|ASF_CORE|ASF MOC' -- ':!docs/migration/provenance/**'; then
+            echo 'LEGACY_FACTORY_BRANDING_FOUND'
+            exit 1
+          fi
+          echo 'NIRA_NAMING_GATE=PASS'
