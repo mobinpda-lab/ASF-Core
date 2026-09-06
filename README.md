@@ -1,15 +1,15 @@
-# ASF-Core
+# NIRA
 
-Autonomous Software Factory Core Platform based on ASF-MOC v9.0.
+NIRA — Autonomous Software Factory Core Platform.
 
 ## Mission
 
-ASF-Core is the **independent factory control plane** for operating multiple software repositories. Product repositories are workloads/clients of the factory, never containers of the factory core.
+NIRA is the **independent factory control plane** for operating multiple software repositories. Product repositories are workloads/clients of the factory, never containers of the factory core.
 
 ## Canonical boundary
 
 ```text
-ASF-Core (FACTORY)
+NIRA (FACTORY)
   Governance / Registry / Intake / Queue / Lease / Fencing
   Workers / Execution / Evidence / Gates / Security
   Promotion / Release / Recovery / Audit / Observability
@@ -45,8 +45,8 @@ IDEA -> DEFINITION -> ARCHITECTURE -> TASK -> QUEUE -> LEASE
 
 ## Current maturity statement
 
-ASF-Core has the architectural boundary, production orchestrator bootstrap, canonical contracts, fail-closed lifecycle primitives, evidence model foundation, gate primitives, recovery policy and conformance tests in place.
+NIRA has the architectural boundary, production orchestrator bootstrap, canonical contracts, fail-closed lifecycle primitives, evidence model foundation, gate primitives, recovery policy and conformance tests in place.
 
 **L10 remains `UNVERIFIED` until a real registered client task produces reconstructible end-to-end factory evidence, including bounded failure/fencing/recovery and release/promotion evidence.**
 
-See `docs/architecture/ASF_MOC_INDEPENDENT_FACTORY_ARCHITECTURE.md` and `docs/architecture/ASF_FACTORY_CONTROL_PLANE_v1.md` for the canonical boundary and implementation contract.
+See `docs/architecture/NIRA_FACTORY_CONTROL_PLANE_v1.md` and `docs/architecture/NIRA_INDEPENDENT_FACTORY_ARCHITECTURE.md` for the canonical boundary and implementation contract.
