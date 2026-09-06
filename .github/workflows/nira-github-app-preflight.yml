@@ -36,7 +36,8 @@ jobs:
         uses: actions/create-github-app-token@v2
         id: app-token
         with:
-          app-id: ${{ secrets.NIRA_GITHUB_APP_ID }}
+          # Normalize the App ID to a JSON number so the JWT `iss` claim is numeric.
+          app-id: ${{ fromJSON(secrets.NIRA_GITHUB_APP_ID) }}
           private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ASF-Core,Arvin-clean,YadNegar,NetworkCenterMonitor
