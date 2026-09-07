@@ -11,20 +11,20 @@ projects:
     adapter: nira-arvin
     task_source: github_issues
     branch_policy:
-      prefix: factory/
+      prefix: nira/
       base: main
     pr_policy:
       base: main
-      required_label: asf-authorized
+      required_label: nira-authorized
     ci_contract:
-      required_workflow: ASF-Core CI
+      required_workflow: NIRA CI
     required_checks:
-      - ASF-Core CI
+      - NIRA CI
     security_gates:
       - exact_head
       - exact_base
     artifact_requirements:
-      - asf-core-test-results
+      - nira-test-results
     promotion_policy:
       enabled: true
       authorization: nira
@@ -48,7 +48,7 @@ projects:
       - exact_head_verified
       - ci_verified
       - promotion_verified
-    last_verified_main_sha: 9a773b7898ff63276ad6a214009b163f904e8923
+    last_verified_main_sha: a526e81c638b699a78c003073ef27b1346e49cd8
 
   - project_id: yadnegar
     repository: mobinpda-lab/YadNegar
@@ -59,23 +59,23 @@ projects:
     adapter: generic
     task_source: github_issues
     branch_policy:
-      prefix: factory/
+      prefix: nira/
       base: main
     pr_policy:
       base: main
-      required_label: asf-authorized
+      required_label: nira-authorized
     ci_contract:
-      required_workflow: ASF-Core CI
+      required_workflow: NIRA CI
     required_checks:
-      - ASF-Core CI
+      - NIRA CI
     security_gates:
       - exact_head
       - exact_base
     artifact_requirements:
-      - asf-core-test-results
+      - nira-test-results
     promotion_policy:
       enabled: true
-      authorization: asf-authorized
+      authorization: nira
       require_exact_head: true
       require_exact_base: true
     release_policy:
@@ -107,23 +107,23 @@ projects:
     adapter: generic
     task_source: github_issues
     branch_policy:
-      prefix: factory/
+      prefix: nira/
       base: main
     pr_policy:
       base: main
-      required_label: asf-authorized
+      required_label: nira-authorized
     ci_contract:
-      required_workflow: ASF-Core CI
+      required_workflow: NIRA CI
     required_checks:
-      - ASF-Core CI
+      - NIRA CI
     security_gates:
       - exact_head
       - exact_base
     artifact_requirements:
-      - asf-core-test-results
+      - nira-test-results
     promotion_policy:
       enabled: true
-      authorization: asf-authorized
+      authorization: nira
       require_exact_head: true
       require_exact_base: true
     release_policy:
