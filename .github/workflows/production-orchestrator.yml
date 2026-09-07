@@ -61,14 +61,15 @@ jobs:
           enabled=$(jq -r '.promotion.enabled' "$policy")
           required_label=$(jq -r '.promotion.required_label' "$policy")
           head_prefix=$(jq -r '.promotion.head_branch_prefix' "$policy")
-          required_workflow=$(jq -r '.promotion.required_workflow' "$policy")
-          required_artifact=$(jq -r '.promotion.required_artifact' "$policy")
           max_candidates=$(jq -r '.promotion.max_candidates_per_cycle' "$policy")
+          auto_ready=$(jq -r '.promotion.auto_ready_when_all_gates_pass // false' "$policy")
+          mapfile -t required_workflows < <(jq -r '.promotion.required_workflows[]' "$policy")
           [[ "$enabled" == "true" ]] || { echo "PROMOTION_DISABLED"; exit 0; }
-          [[ "$required_label" != "null" && "$head_prefix" != "null" && "$required_workflow" != "null" && "$required_artifact" != "null" ]] || { echo "BLOCK invalid registry policy"; exit 1; }
+          [[ "${#required_workflows[@]}" -gt 0 ]] || { echo "BLOCK invalid registry policy: no required workflows"; exit 1; }
+          [[ "$required_label" != "null" && "$head_prefix" != "null" ]] || { echo "BLOCK invalid registry policy"; exit 1; }
 
           prs=$(gh api --paginate "repos/$repo/pulls?state=open&base=main&per_page=100" | jq -s 'add')
-          candidates=$(jq -c --arg label "$required_label" --arg prefix "$head_prefix" '[.[] | select(.draft == false and .mergeable != false and (.labels | map(.name) | index($label))) | select(.head.ref | startswith($prefix))] | sort_by(.number)' <<<"$prs")
+          candidates=$(jq -c --arg label "$required_label" --arg prefix "$head_prefix" '[.[] | select(.mergeable != false and (.labels | map(.name) | index($label))) | select(.head.ref | startswith($prefix))] | sort_by(.number)' <<<"$prs")
           count=$(jq 'length' <<<"$candidates")
           echo "DISCOVERY candidates=$count label=$required_label prefix=$head_prefix"
           [[ "$count" -le "$max_candidates" ]] || { echo "BLOCK candidate overflow count=$count max=$max_candidates"; exit 1; }
@@ -78,30 +79,56 @@ jobs:
             pr=$(jq -r '.number' <<<"$row")
             head=$(jq -r '.head.sha' <<<"$row")
             base_sha=$(jq -r '.base.sha' <<<"$row")
+            draft=$(jq -r '.draft' <<<"$row")
             current_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
-            [[ "$base_sha" == "$current_main" ]] || { echo "BLOCK PR#$pr BASE_DRIFT base=$base_sha main=$current_main"; exit 1; }
+            [[ "$base_sha" == "$current_main" ]] || { echo "BLOCK PR#$pr BASE_DRIFT base=$base_sha main=$current_main"; continue; }
 
-            runs=$(gh run list --repo "$repo" --commit "$head" --json databaseId,status,conclusion,workflowName,headSha --limit 50)
-            run_id=$(jq -r --arg sha "$head" --arg wf "$required_workflow" '[.[] | select(.headSha == $sha and .status == "completed" and .conclusion == "success" and .workflowName == $wf)][0].databaseId // empty' <<<"$runs")
-            [[ -n "$run_id" ]] || { echo "BLOCK PR#$pr no exact-head successful workflow=$required_workflow"; exit 1; }
-
-            artifact_json=$(gh api "repos/$repo/actions/runs/$run_id/artifacts")
-            artifact_count=$(jq --arg artifact "$required_artifact" '[.artifacts[] | select(.name == $artifact and .expired == false)] | length' <<<"$artifact_json")
-            [[ "$artifact_count" -gt 0 ]] || { echo "BLOCK PR#$pr run=$run_id missing artifact=$required_artifact"; exit 1; }
+            runs=$(gh run list --repo "$repo" --commit "$head" --json databaseId,status,conclusion,workflowName,headSha --limit 100)
+            all_green=true
+            for wf in "${required_workflows[@]}"; do
+              run_id=$(jq -r --arg sha "$head" --arg wf "$wf" '[.[] | select(.headSha == $sha and .status == "completed" and .conclusion == "success" and .workflowName == $wf)][0].databaseId // empty' <<<"$runs")
+              if [[ -z "$run_id" ]]; then
+                echo "BLOCK PR#$pr no exact-head successful workflow=$wf"
+                all_green=false
+                continue
+              fi
+              artifact=$(jq -r --arg wf "$wf" '.promotion.required_artifacts[$wf] // empty' "$policy")
+              if [[ -n "$artifact" ]]; then
+                artifact_json=$(gh api "repos/$repo/actions/runs/$run_id/artifacts")
+                artifact_count=$(jq --arg artifact "$artifact" '[.artifacts[] | select(.name == $artifact and .expired == false)] | length' <<<"$artifact_json")
+                if [[ "$artifact_count" -eq 0 ]]; then
+                  echo "BLOCK PR#$pr workflow=$wf run=$run_id missing artifact=$artifact"
+                  all_green=false
+                fi
+              fi
+            done
+            [[ "$all_green" == "true" ]] || continue
 
             pr_now=$(gh api "repos/$repo/pulls/$pr")
-            [[ "$(jq -r '.state' <<<"$pr_now")" == "open" ]] || { echo "BLOCK PR#$pr state changed"; exit 1; }
-            [[ "$(jq -r '.merged' <<<"$pr_now")" == "false" ]] || { echo "BLOCK PR#$pr already merged"; exit 1; }
-            [[ "$(jq -r '.draft' <<<"$pr_now")" == "false" ]] || { echo "BLOCK PR#$pr still draft"; exit 1; }
-            [[ "$(jq -r '.head.sha' <<<"$pr_now")" == "$head" ]] || { echo "BLOCK PR#$pr HEAD_DRIFT during validation"; exit 1; }
+            [[ "$(jq -r '.state' <<<"$pr_now")" == "open" ]] || { echo "BLOCK PR#$pr state changed"; continue; }
+            [[ "$(jq -r '.merged' <<<"$pr_now")" == "false" ]] || { echo "BLOCK PR#$pr already merged"; continue; }
+            [[ "$(jq -r '.head.sha' <<<"$pr_now")" == "$head" ]] || { echo "BLOCK PR#$pr HEAD_DRIFT during validation"; continue; }
 
             pre_merge_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
-            [[ "$pre_merge_main" == "$current_main" ]] || { echo "BLOCK PR#$pr MAIN_MOVED_BEFORE_MERGE old=$current_main new=$pre_merge_main"; exit 1; }
+            [[ "$pre_merge_main" == "$current_main" ]] || { echo "BLOCK PR#$pr MAIN_MOVED_BEFORE_MERGE old=$current_main new=$pre_merge_main"; continue; }
 
-            echo "READY PR#$pr head=$head base=$base_sha run=$run_id artifact=$required_artifact main=$current_main"
-            payload=$(jq -n --arg sha "$head" --arg title "promote(nira): PR#$pr registry-authorized promotion" --arg message "NIRA registry-authorized promotion: exact HEAD/base, authentic CI, artifact evidence, fail-closed validation." '{sha:$sha,merge_method:"squash",commit_title:$title,commit_message:$message}')
+            if [[ "$draft" == "true" ]]; then
+              if [[ "$auto_ready" == "true" ]]; then
+                echo "PR#$pr all promotion gates green; converting draft to ready-for-review."
+                gh api --method POST "repos/$repo/pulls/$pr/ready_for_review" >/dev/null
+                pr_now=$(gh api "repos/$repo/pulls/$pr")
+                [[ "$(jq -r '.draft' <<<"$pr_now")" == "false" ]] || { echo "BLOCK PR#$pr ready conversion not confirmed"; continue; }
+              else
+                echo "PR#$pr remains draft by policy; no merge."
+                continue
+              fi
+            fi
+
+            [[ "$(jq -r '.mergeable' <<<"$pr_now")" != "false" ]] || { echo "BLOCK PR#$pr not mergeable"; continue; }
+            echo "READY PR#$pr head=$head base=$base_sha main=$current_main all_required_gates=green"
+            payload=$(jq -n --arg sha "$head" --arg title "promote(nira): PR#$pr registry-authorized promotion" --arg message "NIRA registry-authorized promotion: exact HEAD/base, complete CI/E2E/conformance/security evidence, fail-closed validation." '{sha:$sha,merge_method:"squash",commit_title:$title,commit_message:$message}')
             response=$(curl --fail-with-body -sS -X PUT -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $GH_TOKEN" -H "X-GitHub-Api-Version: 2022-11-28" -H "Content-Type: application/json" "https://api.github.com/repos/$repo/pulls/$pr/merge" -d "$payload")
-            [[ "$(jq -r '.merged // false' <<<"$response")" == "true" ]] || { echo "BLOCK PR#$pr merge API did not confirm merged=true"; exit 1; }
+            [[ "$(jq -r '.merged // false' <<<"$response")" == "true" ]] || { echo "BLOCK PR#$pr merge API did not confirm merged=true"; continue; }
 
             merged_json=$(gh api "repos/$repo/pulls/$pr")
             [[ "$(jq -r '.merged' <<<"$merged_json")" == "true" ]] || { echo "BLOCK PR#$pr post-merge confirmation failed"; exit 1; }
@@ -112,7 +139,6 @@ jobs:
             [[ "$new_main" != "$current_main" ]] || { echo "BLOCK PR#$pr main unchanged"; exit 1; }
             echo "PROMOTED PR#$pr merge_commit=$merge_commit new_main=$new_main"
 
-            # Fast path: immediately wake the same guarded authority for the next candidate.
             gh workflow run production-orchestrator.yml --repo "$repo" --ref main
             echo "NEXT_CYCLE_DISPATCHED"
           done
