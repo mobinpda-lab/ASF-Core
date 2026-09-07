@@ -16,7 +16,7 @@ class FakeGitHub:
         return {"statuses": [{"context": "ci", "state": "success"}]}
 
     def check_runs(self, repo, sha):
-        return {"check_runs": [{"name": "ASF-Core CI", "status": "completed", "conclusion": "success"}]}
+        return {"check_runs": [{"name": "NIRA CI", "status": "completed", "conclusion": "success"}]}
 
     def workflow_runs_for_head(self, repo, sha):
         return {
@@ -24,7 +24,7 @@ class FakeGitHub:
                 {
                     "id": 123,
                     "workflow_id": 77,
-                    "name": "ASF-Core CI",
+                    "name": "NIRA CI",
                     "status": "completed",
                     "conclusion": "success",
                     "head_sha": sha,
@@ -54,7 +54,7 @@ def test_collector_derives_verified_state_from_github_observations():
         expected_base_sha="b" * 40,
         expected_head_sha="h" * 40,
         requirements=EvidenceRequirements(
-            required_workflows=("ASF-Core CI",),
+            required_workflows=("NIRA CI",),
             require_commit_status=True,
             require_artifact=True,
             require_security=True,
@@ -72,7 +72,7 @@ def test_collector_fails_closed_when_security_is_missing():
             {
                 "id": 123,
                 "workflow_id": 77,
-                "name": "ASF-Core CI",
+                "name": "NIRA CI",
                 "status": "completed",
                 "conclusion": "success",
                 "head_sha": sha,
@@ -87,7 +87,7 @@ def test_collector_fails_closed_when_security_is_missing():
         pr_number=659,
         expected_base_sha="b" * 40,
         expected_head_sha="h" * 40,
-        requirements=EvidenceRequirements(required_workflows=("ASF-Core CI",), require_security=True),
+        requirements=EvidenceRequirements(required_workflows=("NIRA CI",), require_security=True),
     )
     assert evidence.observation_state is ObservationState.NOT_EXPOSED
     assert evidence.confidence == "NONE"

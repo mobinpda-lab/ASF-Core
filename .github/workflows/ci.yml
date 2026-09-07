@@ -1,8 +1,8 @@
-name: ASF-Core CI
+name: NIRA CI
 
 on:
   push:
-    branches: [main, 'factory/**']
+    branches: [main, 'nira/**']
   pull_request:
     branches: [main]
 
@@ -22,7 +22,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Validate factory control-plane contract
+      - name: Validate NIRA control-plane contract
         env:
           PYTHONPATH: .
         run: |
@@ -67,7 +67,7 @@ jobs:
           if failed:
               raise SystemExit('Contract validation failed: ' + ', '.join(failed))
 
-          suite = ET.Element('testsuite', name='ASF-Core control-plane contract', tests=str(len(checks)), failures='0')
+          suite = ET.Element('testsuite', name='NIRA control-plane contract', tests=str(len(checks)), failures='0')
           for name, _ in checks:
               ET.SubElement(suite, 'testcase', name=name)
           ET.ElementTree(suite).write('test-results.xml', encoding='utf-8', xml_declaration=True)
@@ -77,6 +77,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: asf-core-test-results
+          name: nira-test-results
           path: test-results.xml
           if-no-files-found: error

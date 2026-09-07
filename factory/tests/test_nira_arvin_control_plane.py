@@ -28,7 +28,7 @@ def make_evidence(task: Task, state: ObservationState, run_id: int) -> Evidence:
         pr_number=1,
         exact_head_sha="b" * 40,
         base_sha="a" * 40,
-        workflow_id="ASF-Core CI",
+        workflow_id="NIRA CI",
         run_id=run_id,
         event="test-independent-observation",
         observation_state=state,

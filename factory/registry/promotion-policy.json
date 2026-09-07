@@ -2,10 +2,10 @@
   "schema_version": "1.0",
   "promotion": {
     "enabled": true,
-    "required_label": "asf-authorized",
-    "head_branch_prefix": "factory/",
-    "required_workflow": "ASF-Core CI",
-    "required_artifact": "asf-core-test-results",
+    "required_label": "nira-authorized",
+    "head_branch_prefix": "nira/",
+    "required_workflow": "NIRA CI",
+    "required_artifact": "nira-test-results",
     "max_candidates_per_cycle": 1,
     "require_base_main_exact_head": true,
     "require_postcondition_main_advance": true

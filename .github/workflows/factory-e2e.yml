@@ -1,8 +1,8 @@
-name: ASF-Core Factory E2E
+name: NIRA Factory E2E
 
 on:
   push:
-    branches: [main, 'factory/**']
+    branches: [main, 'nira/**']
     paths:
       - 'factory/**'
       - '.github/workflows/factory-e2e.yml'
@@ -48,9 +48,9 @@ jobs:
             "schema_version": "1.0",
             "repo": "mobinpda-lab/ASF-Core",
             "exact_head_sha": os.environ["E2E_HEAD_SHA"],
-            "workflow": "ASF-Core Factory E2E",
+            "workflow": "NIRA Factory E2E",
             "run_id": int(os.environ["E2E_RUN_ID"]),
-            "registered_client": "e2e-asf-core-client",
+            "registered_client": "e2e-nira-client",
             "lifecycle": ["REGISTERED", "READY", "LEASED", "RUNNING", "VALIDATING", "FAILED_PROBE", "REQUEUED", "PROMOTABLE", "COMPLETED"],
             "fencing": "VERIFIED",
             "failure_probe": "BLOCKED_FAIL_CLOSED",
@@ -58,7 +58,7 @@ jobs:
             "promotion_gate": "PASS",
             "observation_state": "VERIFIED",
             "confidence": "HIGH",
-            "collector_identity": "asf-core-factory-e2e",
+            "collector_identity": "nira-factory-e2e",
           }
           Path("registered-client-e2e.json").write_text(json.dumps(report, indent=2) + "\n")
           PY
@@ -67,7 +67,7 @@ jobs:
       - name: Upload E2E evidence
         uses: actions/upload-artifact@v4
         with:
-          name: asf-core-factory-e2e-evidence
+          name: nira-factory-e2e-evidence
           path: |
             registered-client-e2e.json
             e2e-junit.xml
