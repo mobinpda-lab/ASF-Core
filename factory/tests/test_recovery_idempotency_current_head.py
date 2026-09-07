@@ -16,7 +16,7 @@ from factory.recovery.policy import RecoveryPolicy
 from factory.runtime.state_machine import LeaseDecision, validate_lease
 
 
-def _task(*, attempt: int = 0, base_sha: str = "a" * 40) -> Task:
+def _task(*, attempt: int = 0, base_sha: str = "a" * 40, state: TaskState = TaskState.READY) -> Task:
     return Task(
         task_id="recovery-idempotency-001",
         project_id="arvin-clean",
@@ -26,7 +26,7 @@ def _task(*, attempt: int = 0, base_sha: str = "a" * 40) -> Task:
         base_main_sha=base_sha,
         attempt=attempt,
         idempotency_key=idempotency_key("arvin-clean", "recovery-idempotency-001", base_sha, attempt),
-        state=TaskState.READY,
+        state=state,
     )
 
 
@@ -70,14 +70,14 @@ def test_idempotency_key_changes_when_attempt_changes():
     assert first != retry
 
 
-def test_expiry_boundary_is_not_accepted_even_with_correct_owner_and_fence():
+def test_expired_authorization_is_rejected_from_leased_state():
     control = NIRAControlPlane(ArvinClientAdapter())
     now = datetime.now(timezone.utc)
-    task = _task()
+    task = _task(state=TaskState.LEASED)
     control.intake(task)
     lease = control.lease(task, "worker-1", now=now)
 
-    with pytest.raises(PermissionError):
+    with pytest.raises(PermissionError, match="REJECT_EXPIRED"):
         control.authorize_worker(
             task,
             lease,
