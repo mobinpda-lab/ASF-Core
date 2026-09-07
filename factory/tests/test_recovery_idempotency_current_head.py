@@ -5,6 +5,7 @@ without mocking their behavior. It is intentionally bounded: it proves the
 current in-process recovery/idempotency contracts, not persistence across a
 process restart or production promotion.
 """
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -16,7 +17,7 @@ from factory.recovery.policy import RecoveryPolicy
 from factory.runtime.state_machine import LeaseDecision, validate_lease
 
 
-def _task(*, attempt: int = 0, base_sha: str = "a" * 40, state: TaskState = TaskState.READY) -> Task:
+def _task(*, attempt: int = 0, base_sha: str = "a" * 40) -> Task:
     return Task(
         task_id="recovery-idempotency-001",
         project_id="arvin-clean",
@@ -26,7 +27,7 @@ def _task(*, attempt: int = 0, base_sha: str = "a" * 40, state: TaskState = Task
         base_main_sha=base_sha,
         attempt=attempt,
         idempotency_key=idempotency_key("arvin-clean", "recovery-idempotency-001", base_sha, attempt),
-        state=state,
+        state=TaskState.READY,
     )
 
 
@@ -73,13 +74,14 @@ def test_idempotency_key_changes_when_attempt_changes():
 def test_expired_authorization_is_rejected_from_leased_state():
     control = NIRAControlPlane(ArvinClientAdapter())
     now = datetime.now(timezone.utc)
-    task = _task(state=TaskState.LEASED)
+    task = _task()
     control.intake(task)
     lease = control.lease(task, "worker-1", now=now)
+    leased_task = replace(task, state=TaskState.LEASED)
 
     with pytest.raises(PermissionError, match="REJECT_EXPIRED"):
         control.authorize_worker(
-            task,
+            leased_task,
             lease,
             "worker-1",
             lease.fence_token,
