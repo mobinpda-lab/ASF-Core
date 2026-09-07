@@ -1,4 +1,4 @@
-"""Executable registered-client lifecycle conformance for ASF-MOC v9.0.
+"""Executable registered-client lifecycle conformance for NIRA.
 
 This test is intentionally deterministic and exercises the real factory contracts,
 not a mocked API: registration -> task intake -> lease/fence -> execution ->
@@ -20,7 +20,7 @@ def test_registered_client_full_lifecycle(tmp_path):
     result_sha = "b" * 40
 
     project = ProjectContract(
-        project_id="e2e-asf-core-client",
+        project_id="e2e-nira-client",
         repository="mobinpda-lab/ASF-Core",
         owner="mobinpda-lab",
         adapter="generic",
@@ -53,7 +53,7 @@ def test_registered_client_full_lifecycle(tmp_path):
         project_id=project.project_id,
         lease_id=lease.lease_id,
         worker_id=lease.worker_id,
-        branch="factory/e2e-task-001",
+        branch="nira/e2e-task-001",
         base_sha=main_sha,
         result_sha=result_sha,
         tests={"unit": "PASS", "conformance": "PASS"},
@@ -79,17 +79,17 @@ def test_registered_client_full_lifecycle(tmp_path):
         pr_number=None,
         exact_head_sha=result_sha,
         base_sha=main_sha,
-        workflow_id="factory-e2e",
+        workflow_id="nira-factory-e2e",
         run_id=None,
         event="workflow",
         check_runs=({"name": "contract-tests", "conclusion": "success"},),
-        artifacts=({"name": "asf-core-test-results", "expired": False},),
+        artifacts=({"name": "nira-test-results", "expired": False},),
         artifact_digests=("sha256:e2e-conformance",),
         provider="github",
         observed_at=now.isoformat(),
         observation_state=ObservationState.VERIFIED,
         confidence="HIGH",
-        collector_identity="asf-core-factory-e2e",
+        collector_identity="nira-factory-e2e",
     )
     evidence.validate()
 
@@ -97,7 +97,7 @@ def test_registered_client_full_lifecycle(tmp_path):
         Gate("exact-head", lambda e: e.exact_head_sha == result_sha),
         Gate("base-sha", lambda e: e.base_sha == main_sha),
         Gate("verified-evidence", lambda e: e.observation_state == ObservationState.VERIFIED),
-        Gate("artifact", lambda e: any(a["name"] == "asf-core-test-results" and not a["expired"] for a in e.artifacts)),
+        Gate("artifact", lambda e: any(a["name"] == "nira-test-results" and not a["expired"] for a in e.artifacts)),
     ], evidence)
     assert passed.result == GateResult.PASS
 
