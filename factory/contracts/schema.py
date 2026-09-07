@@ -1,4 +1,4 @@
-"""Canonical ASF-MOC factory contracts.
+"""Canonical NIRA factory contracts.
 
 The factory owns these contracts; product repositories are adapters/clients.
 """
