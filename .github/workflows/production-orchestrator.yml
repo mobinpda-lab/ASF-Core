@@ -4,13 +4,19 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled, closed]
+  workflow_run:
+    workflows: ['NIRA CI', 'NIRA Factory E2E', 'NIRA Factory Conformance', 'NIRA Security Gate']
+    types: [completed]
   schedule:
     - cron: '*/5 * * * *'
 
 permissions:
   contents: read
-  pull-requests: read
-  actions: read
+  pull-requests: write
+  actions: write
   issues: read
 
 concurrency:
@@ -24,10 +30,10 @@ env:
 
 jobs:
   promote:
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.repository.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout exact ref
+      - name: Checkout exact main
         uses: actions/checkout@v4
         with:
           ref: main
@@ -86,7 +92,11 @@ jobs:
             pr_now=$(gh api "repos/$repo/pulls/$pr")
             [[ "$(jq -r '.state' <<<"$pr_now")" == "open" ]] || { echo "BLOCK PR#$pr state changed"; exit 1; }
             [[ "$(jq -r '.merged' <<<"$pr_now")" == "false" ]] || { echo "BLOCK PR#$pr already merged"; exit 1; }
+            [[ "$(jq -r '.draft' <<<"$pr_now")" == "false" ]] || { echo "BLOCK PR#$pr still draft"; exit 1; }
             [[ "$(jq -r '.head.sha' <<<"$pr_now")" == "$head" ]] || { echo "BLOCK PR#$pr HEAD_DRIFT during validation"; exit 1; }
+
+            pre_merge_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
+            [[ "$pre_merge_main" == "$current_main" ]] || { echo "BLOCK PR#$pr MAIN_MOVED_BEFORE_MERGE old=$current_main new=$pre_merge_main"; exit 1; }
 
             echo "READY PR#$pr head=$head base=$base_sha run=$run_id artifact=$required_artifact main=$current_main"
             payload=$(jq -n --arg sha "$head" --arg title "promote(nira): PR#$pr registry-authorized promotion" --arg message "NIRA registry-authorized promotion: exact HEAD/base, authentic CI, artifact evidence, fail-closed validation." '{sha:$sha,merge_method:"squash",commit_title:$title,commit_message:$message}')
@@ -101,4 +111,8 @@ jobs:
             [[ "$new_main" == "$merge_commit" ]] || { echo "BLOCK PR#$pr main postcondition mismatch main=$new_main merge_commit=$merge_commit"; exit 1; }
             [[ "$new_main" != "$current_main" ]] || { echo "BLOCK PR#$pr main unchanged"; exit 1; }
             echo "PROMOTED PR#$pr merge_commit=$merge_commit new_main=$new_main"
+
+            # Fast path: immediately wake the same guarded authority for the next candidate.
+            gh workflow run production-orchestrator.yml --repo "$repo" --ref main
+            echo "NEXT_CYCLE_DISPATCHED"
           done
