@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "canonical_name": "NIRA",
+  "display_name": "NIRA",
+  "role": "autonomous_software_factory_control_plane",
+  "canonical_repository_identity": "NIRA",
+  "current_github_repository": "mobinpda-lab/ASF-Core",
+  "repository_rename_required": true,
+  "historical_identifiers": [
+    "ASF-Core",
+    "ASF-MOC"
+  ],
+  "historical_identifiers_may_be_active_authority": false,
+  "single_factory_authority": true,
+  "clients": [
+    "Arvin-clean",
+    "YadNegar",
+    "NetworkCenterMonitor"
+  ],
+  "policy": "NIRA is the only canonical factory identity. ASF-Core and ASF-MOC are provenance/history identifiers only."
+}
