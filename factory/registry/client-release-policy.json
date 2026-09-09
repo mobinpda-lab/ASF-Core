@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0",
+  "authority": "NIRA",
+  "mode": "client-native-release-orchestration",
+  "clients": {
+    "mobinpda-lab/Arvin-clean": {
+      "project_id": "arvin-clean",
+      "enabled": true,
+      "workflow": {
+        "name": "Arvin Release Closure",
+        "file": "release-closure.yml",
+        "dispatchable": true
+      },
+      "post_release_validation": {
+        "name": "Arvin Final Head Release Validation",
+        "file": "final-head-release-validation.yml",
+        "dispatchable": true
+      },
+      "release_semantics": "client-owned-prerelease",
+      "require_exact_main": true
+    },
+    "mobinpda-lab/YadNegar": {
+      "project_id": "yadnegar",
+      "enabled": true,
+      "workflow": {
+        "name": "YadNegar Autonomous Release",
+        "file": "autonomous-release.yml",
+        "dispatchable": true
+      },
+      "prerequisite_workflows": [
+        {
+          "name": "YadNegar Production Signing",
+          "file": "production-signing.yml",
+          "dispatchable": true
+        }
+      ],
+      "release_semantics": "client-owned-production-release",
+      "require_exact_main": true
+    },
+    "mobinpda-lab/NetworkCenterMonitor": {
+      "project_id": "network-center-monitor",
+      "enabled": false,
+      "reason": "No dedicated client-owned release workflow is registered yet; promotion remains available but release automation fails closed."
+    }
+  }
+}
