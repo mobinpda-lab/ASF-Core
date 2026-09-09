@@ -99,3 +99,14 @@ def test_main_closure_revalidates_exact_final_main_without_promotion_authority()
     assert "observation_state" in closure
     assert "validator_identity" in closure
     assert "pull-requests: write" not in closure
+
+
+def test_control_issue_identity_is_supported_by_both_worker_lanes():
+    lease = read(".github/workflows/nira-lease.yml")
+    ai_worker = read(".github/workflows/nira-cross-repo-worker.yml")
+    deterministic = read(".github/workflows/nira-deterministic-doc-worker.yml")
+    assert "control_issue_number: String(issue.number)" in lease
+    assert "control_issue_number:" in ai_worker
+    assert "control_issue_number:" in deterministic
+    assert "CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}" in ai_worker
+    assert "CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}" in deterministic
