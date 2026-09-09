@@ -148,4 +148,4 @@ jobs:
             [[ "$new_main" != "$current_main" ]] || { echo "BLOCK PR#$pr main unchanged"; exit 1; }
 
             gh workflow run production-orchestrator.yml --repo "$repo" --ref main
-done < <(jq -c '.[]' <<<"$candidates")
+          done < <(jq -c '.[]' <<<"$candidates")
