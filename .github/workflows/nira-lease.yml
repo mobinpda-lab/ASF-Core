@@ -1,13 +1,15 @@
 name: NIRA Lease
 
 on:
-  issues:
-    types: [labeled]
   workflow_dispatch:
     inputs:
       issue_number:
-        description: 'Queued NIRA issue number'
-        required: false
+        description: 'Queued NIRA issue number selected by NIRA Queue Scheduler'
+        required: true
+        type: string
+      scheduler_run_id:
+        description: 'Queue Scheduler run that authorized this lease handoff'
+        required: true
         type: string
 
 permissions:
@@ -16,12 +18,11 @@ permissions:
   actions: write
 
 concurrency:
-  group: nira-lease-${{ github.event.issue.number || 'manual' }}
+  group: nira-lease-${{ inputs.issue_number }}
   cancel-in-progress: false
 
 jobs:
   lease:
-    if: github.event_name == 'workflow_dispatch' || (github.event.label.name == 'factory:queued' && github.event.issue.pull_request == null)
     runs-on: ubuntu-latest
     steps:
       - name: Acquire GitHub-authoritative lease and resolve registered client task
@@ -29,27 +30,42 @@ jobs:
         with:
           github-token: ${{ github.token }}
           script: |
-            let issue = context.payload.issue;
-            if (!issue && context.eventName === 'workflow_dispatch') {
-              const raw = String(context.payload.inputs?.issue_number || '');
-              if (!/^\d+$/.test(raw)) {
-                core.info('Manual invocation without a valid issue_number; no queue mutation performed.');
-                return;
-              }
-              const fetched = await github.rest.issues.get({
-                owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(raw)
-              });
-              issue = fetched.data;
-            }
-            if (!issue) {
-              core.info('No issue payload resolved; no queue mutation performed.');
-              return;
-            }
             const owner = context.repo.owner;
             const repo = context.repo.repo;
+            const rawIssue = String(context.payload.inputs?.issue_number || '');
+            const schedulerRun = String(context.payload.inputs?.scheduler_run_id || '');
+            if (!/^\d+$/.test(rawIssue) || !/^\d+$/.test(schedulerRun)) {
+              core.setFailed('NIRA_BLOCKED=INVALID_SCHEDULER_HANDOFF');
+              return;
+            }
+            const fetched = await github.rest.issues.get({
+              owner, repo, issue_number: Number(rawIssue)
+            });
+            const issue = fetched.data;
+            const labels = new Set((issue.labels || []).map(x => typeof x === 'string' ? x : x.name));
+            if (!labels.has('factory:queued')) {
+              core.setFailed('NIRA_BLOCKED=ISSUE_NOT_QUEUED');
+              return;
+            }
+            if (['factory:blocked','factory:escalated','orchestrator:hold','orchestrator:manual'].some(x => labels.has(x))) {
+              core.setFailed('NIRA_BLOCKED=ISSUE_POLICY_BLOCKED');
+              return;
+            }
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner, repo, issue_number: issue.number, per_page: 100
             });
+            const schedulerMarker = '<!-- nira-scheduler-dispatch-v1:' + schedulerRun + ' -->';
+            const pendingSchedulerHandoff = comments.some(c =>
+              c.body?.includes(schedulerMarker) && c.body?.includes('NIRA_SCHEDULER_DISPATCH=PENDING')
+            );
+            const terminalSchedulerHandoff = comments.some(c =>
+              c.body?.includes(schedulerMarker) &&
+              /NIRA_SCHEDULER_DISPATCH=(CONSUMED|FAILED)/.test(c.body || '')
+            );
+            if (!pendingSchedulerHandoff || terminalSchedulerHandoff) {
+              core.setFailed('NIRA_BLOCKED=UNAUTHORIZED_OR_REPLAYED_SCHEDULER_HANDOFF');
+              return;
+            }
 
             const leaseComments = comments.filter(c => c.body && c.body.includes('<!-- nira-lease-v1 -->'));
             const now = Date.now();
@@ -99,35 +115,50 @@ jobs:
             const leaseId = `nira-lease-${issue.number}-${context.runId}`;
             const fenceToken = String(context.runId);
 
+            const deterministic = /NIRA_EXECUTION_MODE:\s*deterministic-doc-append/i.test(issue.body || '');
+            const workerMode = deterministic ? 'DETERMINISTIC_DOC_APPEND' : 'AI_BOUNDED';
             await github.rest.issues.removeLabel({owner, repo, issue_number: issue.number, name: 'factory:queued'}).catch(() => {});
             await github.rest.issues.addLabels({owner, repo, issue_number: issue.number, labels: ['factory:leased']});
             await github.rest.issues.createComment({
               owner, repo, issue_number: issue.number,
-              body: `<!-- nira-lease-v1 -->\nNIRA_LEASE=ACQUIRED\nISSUE=${issue.number}\nCLIENT_REPOSITORY=${clientRepository}\nCLIENT_ISSUE=${clientIssue}\nWORKER_IDENTITY=${workerId}\nLEASE_ID=${leaseId}\nFENCE_TOKEN=${fenceToken}\nLEASE_RUN_ID=${context.runId}\nLEASE_SHA=${context.sha}\nEXPECTED_CLIENT_MAIN_SHA=${expectedMainSha}\nLEASE_TTL_SECONDS=300\nHEARTBEAT_SECONDS=60`
+              body: `<!-- nira-lease-v1 -->\nNIRA_LEASE=ACQUIRED\nISSUE=${issue.number}\nCLIENT_REPOSITORY=${clientRepository}\nCLIENT_ISSUE=${clientIssue}\nWORKER_IDENTITY=${workerId}\nLEASE_ID=${leaseId}\nFENCE_TOKEN=${fenceToken}\nLEASE_RUN_ID=${context.runId}\nSCHEDULER_RUN_ID=${schedulerRun}\nWORKER_MODE=${workerMode}\nLEASE_SHA=${context.sha}\nEXPECTED_CLIENT_MAIN_SHA=${expectedMainSha}\nLEASE_TTL_SECONDS=300\nHEARTBEAT_SECONDS=60`
             });
-
-            const deterministic = /NIRA_EXECUTION_MODE:\s*deterministic-doc-append/i.test(issue.body || '');
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: issue.number,
+              body: schedulerMarker + '\nNIRA_SCHEDULER_DISPATCH=CONSUMED\nLEASE_RUN_ID=' + context.runId
+            });
             const workerWorkflow = deterministic
               ? 'nira-deterministic-doc-worker.yml'
               : 'nira-cross-repo-worker.yml';
             if (deterministic && clientRepository !== 'mobinpda-lab/NIRA') {
               throw new Error('DETERMINISTIC_DOC_MODE_SELF_DOGFOOD_ONLY');
             }
-            await github.rest.actions.createWorkflowDispatch({
-              owner,
-              repo,
-              workflow_id: workerWorkflow,
-              ref: context.ref.replace('refs/heads/', ''),
-              inputs: {
-                repository: clientRepository,
-                issue_number: String(clientIssue),
-                expected_main_sha: expectedMainSha,
-                worker_id: workerId,
-                lease_id: leaseId,
-                fence_token: fenceToken
-              }
-            });
-            core.notice(`NIRA_WORKER_MODE=${deterministic ? 'DETERMINISTIC_DOC_APPEND' : 'AI_BOUNDED'}`);
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner,
+                repo,
+                workflow_id: workerWorkflow,
+                ref: 'main',
+                inputs: {
+                  repository: clientRepository,
+                  issue_number: String(clientIssue),
+                  expected_main_sha: expectedMainSha,
+                  worker_id: workerId,
+                  lease_id: leaseId,
+                  fence_token: fenceToken
+                }
+              });
+            } catch (error) {
+              await github.rest.issues.removeLabel({owner, repo, issue_number: issue.number, name: 'factory:leased'}).catch(() => {});
+              await github.rest.issues.addLabels({owner, repo, issue_number: issue.number, labels: ['factory:blocked']});
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: issue.number,
+                body: '<!-- nira-worker-dispatch-failure-v1 -->\nNIRA_WORKER_DISPATCH=FAILED_CLOSED\nERROR=' +
+                  String(error.message || error).slice(0, 500)
+              });
+              throw error;
+            }
+            core.notice('NIRA_WORKER_MODE=' + workerMode);
             core.notice(`NIRA_LEASE=ACQUIRED issue=${issue.number}`);
             core.notice(`NIRA_CLIENT=${clientRepository}#${clientIssue}`);
             core.notice(`NIRA_EXPECTED_CLIENT_MAIN_SHA=${expectedMainSha}`);
