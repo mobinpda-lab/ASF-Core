@@ -28,7 +28,7 @@ on:
 
 permissions:
   contents: read
-  actions: read
+  actions: write
 
 concurrency:
   group: nira-client-validation-${{ inputs.repository }}-${{ inputs.pr_number }}-${{ inputs.expected_head_sha }}
@@ -191,3 +191,26 @@ jobs:
           name: nira-client-validation-${{ inputs.pr_number }}-${{ inputs.expected_head_sha }}
           path: nira-client-validation-evidence.json
           if-no-files-found: error
+
+      - name: Hand verified client head to separate promotion authority
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'nira-client-promotion.yml',
+              ref: 'main',
+              inputs: {
+                repository: '${{ inputs.repository }}',
+                pr_number: '${{ inputs.pr_number }}',
+                expected_head_sha: '${{ inputs.expected_head_sha }}',
+                control_issue_number: '${{ inputs.control_issue_number }}'
+              }
+            });
+            core.notice(
+              'NIRA_CLIENT_PROMOTION_DISPATCH=REQUESTED repo=${{ inputs.repository }}' +
+              ' pr=${{ inputs.pr_number }} head=${{ inputs.expected_head_sha }}'
+            );
