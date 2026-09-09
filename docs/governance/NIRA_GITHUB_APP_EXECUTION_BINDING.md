@@ -31,7 +31,7 @@ The App must NOT receive repository administration, Actions write/dispatch autho
 
 ## Repository scope
 The installation must be limited to:
-- `mobinpda-lab/ASF-Core`
+- `mobinpda-lab/NIRA`
 - `mobinpda-lab/Arvin-clean`
 - `mobinpda-lab/YadNegar`
 - `mobinpda-lab/NetworkCenterMonitor`
@@ -75,4 +75,4 @@ Worker execution must not import or execute Arvin product logic as NIRA factory 
 Worker identity has no merge authority. Promotion authorization is a separate NIRA gate and is allowed only after independent evidence collection validates the exact commit, CI/security results, provenance, and policy gates.
 
 ## Current verified state
-As of this branch revision, the required external App installation and credential binding are NOT verified through the available GitHub interface. Therefore no real client mutation is authorized and no L10 claim is valid.
+The required external App installation and credential binding are NOT verified through the available GitHub interface. Therefore no real client mutation is authorized and no L10 claim is valid.
