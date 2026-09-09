@@ -8,6 +8,7 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: write
 
 concurrency:
   group: nira-intake-queue-${{ github.event.issue.number || 'manual' }}
@@ -50,3 +51,10 @@ jobs:
               owner, repo, issue_number: issue.number,
               body: `${marker}\nNIRA_INTAKE=ACCEPTED\nNIRA_QUEUE=GITHUB_ISSUE\nISSUE=${issue.number}\nSHA=${context.sha}`
             });
+            await github.rest.actions.createWorkflowDispatch({
+              owner, repo,
+              workflow_id: 'nira-lease.yml',
+              ref: context.ref.replace('refs/heads/', ''),
+              inputs: { issue_number: String(issue.number) }
+            });
+            core.notice(`NIRA_LEASE_DISPATCH=REQUESTED issue=${issue.number}`);
