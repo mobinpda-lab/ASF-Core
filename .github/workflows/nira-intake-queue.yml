@@ -53,8 +53,7 @@ jobs:
             });
             await github.rest.actions.createWorkflowDispatch({
               owner, repo,
-              workflow_id: 'nira-lease.yml',
-              ref: context.ref.replace('refs/heads/', ''),
-              inputs: { issue_number: String(issue.number) }
+              workflow_id: 'nira-queue-scheduler.yml',
+              ref: 'main'
             });
-            core.notice(`NIRA_LEASE_DISPATCH=REQUESTED issue=${issue.number}`);
+            core.notice('NIRA_SCHEDULER_WAKE=REQUESTED issue=' + issue.number);
