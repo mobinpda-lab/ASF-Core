@@ -1,0 +1,1 @@
+"""NIRA deterministic intelligence primitives."""
