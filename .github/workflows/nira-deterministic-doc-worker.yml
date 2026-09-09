@@ -1,0 +1,175 @@
+name: NIRA Deterministic Documentation Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: 'NIRA self-dogfood repository'
+        required: true
+        type: string
+      issue_number:
+        description: 'NIRA issue number'
+        required: true
+        type: string
+      expected_main_sha:
+        description: 'Exact NIRA main SHA leased by NIRA'
+        required: true
+        type: string
+      worker_id:
+        description: 'Unique NIRA worker identity'
+        required: true
+        type: string
+      lease_id:
+        description: 'NIRA lease identifier'
+        required: true
+        type: string
+      fence_token:
+        description: 'Positive NIRA fencing token'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nira-deterministic-doc-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate deterministic self-dogfood boundary
+        shell: bash
+        env:
+          CLIENT_REPOSITORY: ${{ inputs.repository }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          WORKER_ID: ${{ inputs.worker_id }}
+          LEASE_ID: ${{ inputs.lease_id }}
+          FENCE_TOKEN: ${{ inputs.fence_token }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+        run: |
+          set -euo pipefail
+          test "$CLIENT_REPOSITORY" = 'mobinpda-lab/NIRA'
+          test "$ISSUE_NUMBER" -gt 0
+          test -n "$WORKER_ID"
+          test -n "$LEASE_ID"
+          test "$FENCE_TOKEN" -gt 0
+          test "${#EXPECTED_MAIN_SHA}" -eq 40
+
+      - name: Create GitHub App installation token
+        id: app_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ fromJSON(secrets.NIRA_GITHUB_APP_ID) }}
+          private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
+          owner: mobinpda-lab
+          repositories: NIRA
+
+      - name: Apply exact bounded documentation append
+        id: execute
+        uses: actions/github-script@v7
+        env:
+          CLIENT_REPOSITORY: ${{ inputs.repository }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          WORKER_ID: ${{ inputs.worker_id }}
+          LEASE_ID: ${{ inputs.lease_id }}
+          FENCE_TOKEN: ${{ inputs.fence_token }}
+        with:
+          github-token: ${{ steps.app_token.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const [owner, repo] = process.env.CLIENT_REPOSITORY.split('/');
+            const mainRef = await github.rest.git.getRef({owner, repo, ref: 'heads/main'});
+            const observed = mainRef.data.object.sha;
+            if (observed !== process.env.EXPECTED_MAIN_SHA) {
+              throw new Error(`NIRA_FENCING=HEAD_DRIFT expected=${process.env.EXPECTED_MAIN_SHA} observed=${observed}`);
+            }
+
+            const issue = await github.rest.issues.get({
+              owner, repo, issue_number: Number(process.env.ISSUE_NUMBER)
+            });
+            const body = issue.data.body || '';
+            if (!/NIRA_EXECUTION_MODE:\s*deterministic-doc-append/i.test(body)) {
+              throw new Error('NIRA_DETERMINISTIC_MODE_NOT_AUTHORIZED');
+            }
+            const pathMatch = body.match(/NIRA_DETERMINISTIC_PATH:\s*([^\n\r]+)/i);
+            if (!pathMatch) throw new Error('NIRA_DETERMINISTIC_PATH_MISSING');
+            const path = pathMatch[1].trim();
+            if (!(path === 'README.md' || (path.startsWith('docs/') && path.endsWith('.md')))) {
+              throw new Error(`NIRA_DETERMINISTIC_PATH_REJECTED=${path}`);
+            }
+            const begin = '<!-- NIRA_DETERMINISTIC_APPEND_BEGIN -->';
+            const end = '<!-- NIRA_DETERMINISTIC_APPEND_END -->';
+            const start = body.indexOf(begin);
+            const finish = body.indexOf(end);
+            if (start < 0 || finish <= start) throw new Error('NIRA_DETERMINISTIC_PAYLOAD_MISSING');
+            const payload = body.slice(start + begin.length, finish).trim();
+            if (!payload || payload.length > 4000) throw new Error('NIRA_DETERMINISTIC_PAYLOAD_INVALID');
+
+            const current = await github.rest.repos.getContent({owner, repo, path, ref: observed});
+            if (Array.isArray(current.data) || current.data.type !== 'file') throw new Error('NIRA_DETERMINISTIC_TARGET_NOT_FILE');
+            const original = Buffer.from(current.data.content, 'base64').toString('utf8');
+            if (original.includes(payload)) throw new Error('NIRA_DETERMINISTIC_ALREADY_APPLIED');
+
+            const suffix = `${process.env.ISSUE_NUMBER}-${process.env.WORKER_ID}`
+              .replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80);
+            const workerBranch = `nira/worker-${suffix}`;
+            try {
+              await github.rest.git.getRef({owner, repo, ref: `heads/${workerBranch}`});
+              throw new Error('DUPLICATE_EXECUTION_BRANCH');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            await github.rest.git.createRef({
+              owner, repo, ref: `refs/heads/${workerBranch}`, sha: observed
+            });
+            const next = original.replace(/\s*$/, '') + '\n\n' + payload + '\n';
+            const updated = await github.rest.repos.createOrUpdateFileContents({
+              owner, repo, path,
+              message: `docs(nira): deterministic worker task #${process.env.ISSUE_NUMBER}`,
+              content: Buffer.from(next, 'utf8').toString('base64'),
+              branch: workerBranch,
+              sha: current.data.sha,
+              committer: {name: 'NIRA Factory Worker', email: 'nira-factory@users.noreply.github.com'},
+              author: {name: 'NIRA Factory Worker', email: 'nira-factory@users.noreply.github.com'}
+            });
+            const pr = await github.rest.pulls.create({
+              owner, repo,
+              title: `docs(nira): deterministic self-dogfood #${process.env.ISSUE_NUMBER}`,
+              head: workerBranch, base: 'main', draft: true, maintainer_can_modify: false,
+              body: [
+                '## NIRA deterministic bounded execution', '',
+                `- Worker: ${process.env.WORKER_ID}`,
+                `- Lease: ${process.env.LEASE_ID}`,
+                `- Fence: ${process.env.FENCE_TOKEN}`,
+                `- Exact leased main SHA: ${observed}`,
+                `- Issue: #${process.env.ISSUE_NUMBER}`,
+                `- Changed file: ${path}`, '',
+                'No AI provider was used. Worker has no merge/promotion authority.'
+              ].join('\n')
+            });
+            fs.writeFileSync('nira-deterministic-worker-evidence.txt', [
+              'NIRA_EXECUTION=DETERMINISTIC_DOC_APPEND',
+              `NIRA_CLIENT_REPOSITORY=${process.env.CLIENT_REPOSITORY}`,
+              `NIRA_ISSUE=${process.env.ISSUE_NUMBER}`,
+              `NIRA_EXPECTED_MAIN_SHA=${observed}`,
+              `NIRA_WORKER_ID=${process.env.WORKER_ID}`,
+              `NIRA_LEASE_ID=${process.env.LEASE_ID}`,
+              `NIRA_FENCE_TOKEN=${process.env.FENCE_TOKEN}`,
+              `NIRA_BRANCH=${workerBranch}`,
+              `NIRA_COMMIT=${updated.data.commit.sha}`,
+              `NIRA_PR=${pr.data.number}`,
+              `NIRA_CHANGED_FILES=${path}`
+            ].join('\n') + '\n');
+            core.setOutput('pr_number', String(pr.data.number));
+            core.notice(`NIRA_PR=${pr.data.number}`);
+
+      - name: Upload deterministic execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nira-deterministic-worker-${{ inputs.issue_number }}-${{ inputs.fence_token }}
+          path: nira-deterministic-worker-evidence.txt
+          if-no-files-found: error
