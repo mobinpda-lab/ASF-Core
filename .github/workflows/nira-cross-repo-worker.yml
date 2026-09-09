@@ -139,18 +139,64 @@ jobs:
               return chunks.join('\n');
             }
             function parseJson(text) {
-              const cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+              const cleaned = text.trim().replace(/^\`\`\`(?:json)?\\s*/i, '').replace(/\\s*\`\`\`$/i, '');
               return JSON.parse(cleaned);
             }
 
-            const selection = parseJson(outputText(await responses([
+            async function requestValidatedJson(messages, validate, label) {
+              let request = [...messages];
+              for (let attempt = 1; attempt <= 2; attempt++) {
+                const raw = outputText(await responses(request));
+                try {
+                  const parsed = parseJson(raw);
+                  const problem = validate(parsed);
+                  if (problem) throw new Error(problem);
+                  core.notice('NIRA_MODEL_OUTPUT=' + label + '_VALID attempt=' + attempt);
+                  return parsed;
+                } catch (error) {
+                  const reason = String(error.message || error).slice(0, 1000);
+                  if (attempt >= 2) {
+                    throw new Error('NIRA_' + label + '_OUTPUT_INVALID_AFTER_REPAIR: ' + reason);
+                  }
+                  core.warning('NIRA_MODEL_OUTPUT=' + label + '_REPAIR attempt=' + attempt + ' reason=' + reason);
+                  request = [
+                    ...messages,
+                    {
+                      role: 'user',
+                      content: [{
+                        type: 'input_text',
+                        text: 'Your previous response was rejected by NIRA local validation. Reason: ' +
+                          reason +
+                          '. Return corrected JSON only. Do not broaden scope. Previous response excerpt:\n' +
+                          raw.slice(0, 6000)
+                      }]
+                    }
+                  ];
+                }
+              }
+              throw new Error('NIRA_' + label + '_REPAIR_EXHAUSTED');
+            }
+
+            const selectionMessages = [
               { role: 'system', content: [{ type: 'input_text', text: 'You are a bounded software-factory planner. Select only the smallest relevant source/test/documentation files needed to fix the supplied GitHub issue. Never select secrets, .git paths, GitHub workflow files, generated binaries, lockfiles, or unrelated files. Return JSON only: {"paths":["..."]}. Maximum 8 paths.' }] },
               { role: 'user', content: [{ type: 'input_text', text: `Repository: ${process.env.CLIENT_REPOSITORY}\nIssue #${process.env.ISSUE_NUMBER}: ${issue.data.title}\n${issue.data.body || ''}\n\nAvailable files:\n${paths.join('\n')}` }] }
-            ])));
-            if (!Array.isArray(selection.paths) || selection.paths.length === 0 || selection.paths.length > 8) throw new Error('NIRA_INVALID_FILE_SELECTION');
-            for (const path of selection.paths) {
-              if (!paths.includes(path) || path.startsWith('.github/') || path.includes('..') || /(^|\/)\.env($|\.)/i.test(path) || /secret|credential|token/i.test(path)) throw new Error(`NIRA_REJECTED_PATH=${path}`);
-            }
+            ];
+            const selection = await requestValidatedJson(
+              selectionMessages,
+              value => {
+                if (!Array.isArray(value?.paths) || value.paths.length === 0 || value.paths.length > 8) {
+                  return 'selection paths must contain 1..8 entries';
+                }
+                for (const path of value.paths) {
+                  if (typeof path !== 'string' || !paths.includes(path)) return 'selection contains unknown path';
+                  if (path.startsWith('.github/') || path.includes('..') || /(^|\\/)\\.env($|\\.)/i.test(path) || /secret|credential|token/i.test(path)) {
+                    return 'selection contains forbidden path';
+                  }
+                }
+                return '';
+              },
+              'SELECTION'
+            );
 
             const files = [];
             for (const path of selection.paths) {
@@ -161,12 +207,32 @@ jobs:
               files.push({ path, sha: current.data.sha, content });
             }
 
-            const patchResult = parseJson(outputText(await responses([
+            const patchMessages = [
               { role: 'system', content: [{ type: 'input_text', text: 'You are the NIRA bounded code worker. Fix only the supplied issue using the supplied files. Preserve architecture and existing patterns. Do not invent dependencies. Do not change secrets, workflows, CI policy, permissions, release controls, or unrelated behavior. Return JSON only: {"summary":"...","patches":[{"path":"exact existing path","content":"complete replacement UTF-8 file content"}]}. Maximum 8 patches. If the issue cannot be safely fixed from the supplied context, return {"summary":"BLOCKED: ...","patches":[]}. Never return markdown fences.' }] },
               { role: 'user', content: [{ type: 'input_text', text: `Repository: ${process.env.CLIENT_REPOSITORY}\nIssue #${process.env.ISSUE_NUMBER}: ${issue.data.title}\n${issue.data.body || ''}\n\nExact leased main SHA: ${observed}\n\nFiles:\n${files.map(f => `--- ${f.path} (sha ${f.sha}) ---\n${f.content}`).join('\n')}` }] }
-            ])));
-            if (!Array.isArray(patchResult.patches) || patchResult.patches.length === 0) throw new Error(`NIRA_NO_SAFE_PATCH=${patchResult.summary || 'worker returned no patch'}`);
-            if (patchResult.patches.length > 8) throw new Error('NIRA_TOO_MANY_PATCHES');
+            ];
+            const patchResult = await requestValidatedJson(
+              patchMessages,
+              value => {
+                if (!Array.isArray(value?.patches) || value.patches.length === 0 || value.patches.length > 8) {
+                  return 'patches must contain 1..8 replacements';
+                }
+                let totalChars = 0;
+                for (const patch of value.patches) {
+                  if (!patch || typeof patch.path !== 'string' || typeof patch.content !== 'string') {
+                    return 'each patch requires path and UTF-8 content';
+                  }
+                  if (!files.some(f => f.path === patch.path)) return 'patch is outside selected context';
+                  if (patch.path.startsWith('.github/') || patch.path.includes('..') || /(^|\\/)\\.env($|\\.)/i.test(patch.path) || /secret|credential|token/i.test(patch.path)) {
+                    return 'patch contains forbidden path';
+                  }
+                  totalChars += patch.content.length;
+                }
+                if (totalChars > 400000) return 'replacement payload exceeds bounded size';
+                return '';
+              },
+              'PATCH'
+            );
 
             const suffix = `${process.env.ISSUE_NUMBER}-${process.env.WORKER_ID}`.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80);
             const branch = `nira/worker-${suffix}`;
