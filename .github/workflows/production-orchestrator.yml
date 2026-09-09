@@ -115,7 +115,11 @@ jobs:
 
             if [[ "$draft" == "true" ]]; then
               if [[ "$auto_ready" == "true" ]]; then
-                gh api --method POST "repos/$repo/pulls/$pr/ready_for_review" >/dev/null
+                pr_node_id=$(jq -r '.node_id' <<<"$pr_now")
+                [[ -n "$pr_node_id" && "$pr_node_id" != "null" ]] || { echo "BLOCK PR#$pr missing node_id for ready conversion"; continue; }
+                GH_TOKEN="$READ_TOKEN" gh api graphql \
+                  -f query='mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{number isDraft}}}' \
+                  -f id="$pr_node_id" >/dev/null
                 pr_now=$(GH_TOKEN="$READ_TOKEN" gh api "repos/$repo/pulls/$pr")
                 [[ "$(jq -r '.draft' <<<"$pr_now")" == "false" ]] || { echo "BLOCK PR#$pr ready conversion not confirmed"; continue; }
               else

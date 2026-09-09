@@ -154,3 +154,11 @@ def test_provider_capacity_exhaustion_blocks_ai_lane_without_blind_retry():
     assert "providerCapacityExhausted" in scheduler
     assert "PROVIDER_CAPACITY_EXHAUSTED" in scheduler
     assert "maxAi = 0" in scheduler
+
+
+def test_production_orchestrator_uses_supported_graphql_ready_transition():
+    orchestrator = read(".github/workflows/production-orchestrator.yml")
+    assert "markPullRequestReadyForReview" in orchestrator
+    assert "gh api graphql" in orchestrator
+    assert "/ready_for_review" not in orchestrator
+    assert "node_id" in orchestrator
