@@ -1,9 +1,8 @@
 name: NIRA State Sync
 
 on:
-  workflow_run:
-    workflows: ['NIRA Production Orchestrator', 'NIRA Main Closure']
-    types: [completed]
+  push:
+    branches: [main]
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
@@ -16,11 +15,10 @@ permissions:
 
 concurrency:
   group: nira-state-sync
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   sync:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
