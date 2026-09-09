@@ -64,6 +64,25 @@ For promotion, the factory must establish at minimum:
 
 Default operational policy is a five-minute lease TTL, sixty-second heartbeat, and at most three attempts. Expired ownership is fenced before requeue. Non-retryable failures or exhausted attempts escalate instead of looping indefinitely.
 
+## Client-native validation and promotion boundary
+
+For registered product clients, NIRA does not embed or execute product toolchains. The Project Registry records only provider-facing workflow metadata. A bounded NIRA worker may create a client PR from an exact leased main SHA, but it cannot validate or promote its own result.
+
+The cross-repository chain is:
+
+```text
+NIRA lease/fence -> bounded client branch/PR
+                 -> NIRA Client-Native Validation
+                 -> exact-head client-owned CI/security workflows
+                 -> independent NIRA validation evidence
+                 -> NIRA Client Promotion
+                 -> exact-current-main recheck
+                 -> guarded SHA-locked merge
+                 -> postcondition re-read
+```
+
+The validator has no client content-mutation or merge authority. Client Promotion has no code-generation authority. Promotion requires reconstructible lease provenance from the NIRA control issue, a `nira/` client branch, exact client PR HEAD, exact current client main, all registry-required client-native workflows green on that HEAD, and an unchanged main immediately before merge. Product repositories remain workloads, not factory authorities.
+
 ## Project boundary
 
 Arvin-clean, YadNegar and NetworkCenterMonitor are clients/workloads. Their product code, product-specific workflows and domain logic do not belong in NIRA. Product-side integrations must use an adapter contract.

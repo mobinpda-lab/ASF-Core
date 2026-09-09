@@ -48,6 +48,9 @@ jobs:
             factory/adapters/generic.py
             factory/registry/projects.example.yaml
             factory/registry/promotion-policy.json
+            factory/registry/client-validation-policy.json
+            .github/workflows/nira-client-validation.yml
+            .github/workflows/nira-client-promotion.yml
           )
           for path in "${required[@]}"; do
             test -f "$path" || { echo "MISSING_NIRA_CANONICAL_SURFACE=$path"; exit 1; }
