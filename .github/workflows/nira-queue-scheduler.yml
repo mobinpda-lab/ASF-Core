@@ -1,0 +1,138 @@
+name: NIRA Queue Scheduler
+
+on:
+  issues:
+    types: [labeled, unlabeled, reopened, closed]
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+concurrency:
+  group: nira-queue-scheduler
+  cancel-in-progress: false
+
+env:
+  NIRA_AI_PROVIDER_AVAILABLE: ${{ secrets.OPENAI_API_KEY != '' }}
+
+jobs:
+  schedule:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prioritize capacity and dispatch canonical leases
+        uses: actions/github-script@v7
+        env:
+          AI_PROVIDER_AVAILABLE: ${{ env.NIRA_AI_PROVIDER_AVAILABLE }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const blocked = new Set([
+              'do-not-merge', 'factory:blocked', 'factory:escalated',
+              'orchestrator:hold', 'orchestrator:manual'
+            ]);
+            const priority = labels => {
+              const order = [
+                'priority:release-blocker',
+                'priority:core',
+                'priority:automation',
+                'priority:feature'
+              ];
+              for (let i = 0; i < order.length; i++) if (labels.has(order[i])) return i;
+              return 4;
+            };
+            const laneFor = issue =>
+              /NIRA_EXECUTION_MODE:\s*deterministic-doc-append/i.test(issue.body || '')
+                ? 'DETERMINISTIC' : 'AI';
+            const labelsFor = issue => new Set(
+              (issue.labels || []).map(x => typeof x === 'string' ? x : x.name)
+            );
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', per_page: 100
+            });
+            const work = issues.filter(x => !x.pull_request);
+            const active = work.filter(issue => {
+              const labels = labelsFor(issue);
+              return labels.has('factory:leased') || labels.has('factory:in-progress');
+            });
+            const activeAi = active.filter(x => laneFor(x) === 'AI').length;
+            const activeDeterministic = active.filter(x => laneFor(x) === 'DETERMINISTIC').length;
+            let aiSlots = process.env.AI_PROVIDER_AVAILABLE === 'true'
+              ? Math.max(0, 1 - activeAi) : 0;
+            let deterministicSlots = Math.max(0, 4 - activeDeterministic);
+
+            core.info(
+              'capacity ai=' + activeAi + '/1 available=' + aiSlots +
+              ' provider=' + process.env.AI_PROVIDER_AVAILABLE +
+              ' deterministic=' + activeDeterministic + '/4 available=' + deterministicSlots
+            );
+
+            const candidates = work
+              .map(issue => ({ issue, labels: labelsFor(issue), lane: laneFor(issue) }))
+              .filter(x => x.labels.has('factory:queued'))
+              .filter(x => !x.labels.has('factory:leased') && !x.labels.has('factory:in-progress'))
+              .filter(x => ![...blocked].some(label => x.labels.has(label)))
+              .sort((a, b) => priority(a.labels) - priority(b.labels) || a.issue.number - b.issue.number);
+
+            for (const item of candidates) {
+              if (item.lane === 'AI' && aiSlots <= 0) continue;
+              if (item.lane === 'DETERMINISTIC' && deterministicSlots <= 0) continue;
+
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: item.issue.number, per_page: 100
+              });
+              const pending = comments
+                .filter(c => c.body?.includes('<!-- nira-scheduler-dispatch-v1:'))
+                .filter(c => c.body?.includes('NIRA_SCHEDULER_DISPATCH=PENDING'))
+                .sort((a,b) => new Date(b.created_at) - new Date(a.created_at))[0];
+              if (pending) {
+                const markerId = pending.body.match(/<!-- nira-scheduler-dispatch-v1:(\d+) -->/)?.[1];
+                const terminal = markerId && comments.some(c =>
+                  c.body?.includes('<!-- nira-scheduler-dispatch-v1:' + markerId + ' -->') &&
+                  /NIRA_SCHEDULER_DISPATCH=(CONSUMED|FAILED)/.test(c.body)
+                );
+                const ageMs = Date.now() - new Date(pending.created_at).getTime();
+                if (!terminal && ageMs < 120000) {
+                  core.info('#' + item.issue.number + ': pending scheduler handoff still active; skip duplicate.');
+                  continue;
+                }
+              }
+
+              const schedulerRun = String(context.runId);
+              const marker = '<!-- nira-scheduler-dispatch-v1:' + schedulerRun + ' -->';
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: item.issue.number,
+                body: [
+                  marker,
+                  'NIRA_SCHEDULER_DISPATCH=PENDING',
+                  'LANE=' + item.lane,
+                  'PRIORITY_RANK=' + priority(item.labels),
+                  'SCHEDULER_RUN_ID=' + schedulerRun
+                ].join('\n')
+              });
+              try {
+                await github.rest.actions.createWorkflowDispatch({
+                  owner, repo,
+                  workflow_id: 'nira-lease.yml',
+                  ref: 'main',
+                  inputs: {
+                    issue_number: String(item.issue.number),
+                    scheduler_run_id: schedulerRun
+                  }
+                });
+                if (item.lane === 'AI') aiSlots -= 1;
+                else deterministicSlots -= 1;
+                core.notice('NIRA_SCHEDULER_DISPATCH=REQUESTED issue=' + item.issue.number + ' lane=' + item.lane);
+              } catch (error) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: item.issue.number,
+                  body: marker + '\nNIRA_SCHEDULER_DISPATCH=FAILED\nERROR=' +
+                    String(error.message || error).slice(0, 500)
+                });
+                throw error;
+              }
+            }
