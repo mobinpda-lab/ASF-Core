@@ -57,3 +57,14 @@ def test_production_orchestrator_shell_loop_stays_inside_yaml_run_block():
     orchestrator = read(".github/workflows/production-orchestrator.yml")
     assert "\n          done < <(jq -c '.[]' <<<\"$candidates\")\n" in orchestrator
     assert "\ndone < <(jq -c '.[]' <<<\"$candidates\")\n" not in orchestrator
+
+
+def test_local_promotion_authority_does_not_depend_on_cross_repo_app():
+    orchestrator = read(".github/workflows/production-orchestrator.yml")
+    worker = read(".github/workflows/nira-cross-repo-worker.yml")
+    assert "contents: write" in orchestrator
+    assert "pull-requests: write" in orchestrator
+    assert "GH_TOKEN: ${{ github.token }}" in orchestrator
+    assert "Mint GitHub App installation token" not in orchestrator
+    assert "NIRA_INSTALLATION_ID" not in orchestrator
+    assert "actions/create-github-app-token@v2" in worker
