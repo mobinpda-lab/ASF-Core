@@ -63,7 +63,11 @@ jobs:
           head_prefix=$(jq -r '.promotion.head_branch_prefix' "$policy")
           max_candidates=$(jq -r '.promotion.max_candidates_per_cycle' "$policy")
           auto_ready=$(jq -r '.promotion.auto_ready_when_all_gates_pass // false' "$policy")
-          mapfile -t required_workflows < <(jq -r '.promotion.required_workflows[]' "$policy")
+          mapfile -t required_workflows < <(jq -r '.promotion.required_workflows[]? // empty' "$policy")
+          if [[ "${#required_workflows[@]}" -eq 0 ]]; then
+            legacy_required_workflow=$(jq -r '.promotion.required_workflow // empty' "$policy")
+            [[ -n "$legacy_required_workflow" ]] && required_workflows=("$legacy_required_workflow")
+          fi
           [[ "$enabled" == "true" ]] || { echo "PROMOTION_DISABLED"; exit 0; }
           [[ "${#required_workflows[@]}" -gt 0 ]] || { echo "BLOCK invalid registry policy: no required workflows"; exit 1; }
           [[ "$required_label" != "null" && "$head_prefix" != "null" ]] || { echo "BLOCK invalid registry policy"; exit 1; }
@@ -92,7 +96,7 @@ jobs:
                 all_green=false
                 continue
               fi
-              artifact=$(jq -r --arg wf "$wf" '.promotion.required_artifacts[$wf] // empty' "$policy")
+              artifact=$(jq -r --arg wf "$wf" '.promotion.required_artifacts[$wf] // (if .promotion.required_workflow == $wf then .promotion.required_artifact else empty end) // empty' "$policy")
               if [[ -n "$artifact" ]]; then
                 artifact_json=$(gh api "repos/$repo/actions/runs/$run_id/artifacts")
                 artifact_count=$(jq --arg artifact "$artifact" '[.artifacts[] | select(.name == $artifact and .expired == false)] | length' <<<"$artifact_json")
