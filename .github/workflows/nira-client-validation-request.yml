@@ -38,6 +38,7 @@ jobs:
           permission-pull-requests: read
 
       - name: Resolve exact client PR and dispatch read-only validation
+        id: resolve
         uses: actions/github-script@v7
         env:
           REQUEST_BODY: ${{ github.event.issue.body }}
