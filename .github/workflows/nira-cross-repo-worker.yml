@@ -139,7 +139,7 @@ jobs:
               return chunks.join('\n');
             }
             function parseJson(text) {
-              const cleaned = text.trim().replace(/^\`\`\`(?:json)?\\s*/i, '').replace(/\\s*\`\`\`$/i, '');
+              const cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
               return JSON.parse(cleaned);
             }
 
@@ -189,7 +189,7 @@ jobs:
                 }
                 for (const path of value.paths) {
                   if (typeof path !== 'string' || !paths.includes(path)) return 'selection contains unknown path';
-                  if (path.startsWith('.github/') || path.includes('..') || /(^|\\/)\\.env($|\\.)/i.test(path) || /secret|credential|token/i.test(path)) {
+                  if (path.startsWith('.github/') || path.includes('..') || /(^|\/)\.env($|\.)/i.test(path) || /secret|credential|token/i.test(path)) {
                     return 'selection contains forbidden path';
                   }
                 }
@@ -223,7 +223,7 @@ jobs:
                     return 'each patch requires path and UTF-8 content';
                   }
                   if (!files.some(f => f.path === patch.path)) return 'patch is outside selected context';
-                  if (patch.path.startsWith('.github/') || patch.path.includes('..') || /(^|\\/)\\.env($|\\.)/i.test(patch.path) || /secret|credential|token/i.test(patch.path)) {
+                  if (patch.path.startsWith('.github/') || patch.path.includes('..') || /(^|\/)\.env($|\.)/i.test(patch.path) || /secret|credential|token/i.test(patch.path)) {
                     return 'patch contains forbidden path';
                   }
                   totalChars += patch.content.length;
