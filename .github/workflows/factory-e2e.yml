@@ -5,12 +5,12 @@ on:
     branches: [main, 'nira/**']
     paths:
       - 'factory/**'
-      - '.github/workflows/factory-e2e.yml'
+      - '.github/workflows/**'
   pull_request:
     branches: [main]
     paths:
       - 'factory/**'
-      - '.github/workflows/factory-e2e.yml'
+      - '.github/workflows/**'
   schedule:
     - cron: '*/30 * * * *'
   workflow_dispatch:
