@@ -18,6 +18,8 @@ concurrency:
 
 env:
   NIRA_AI_PROVIDER_AVAILABLE: ${{ secrets.OPENAI_API_KEY != '' }}
+  NIRA_MAX_AI_LEASES: ${{ vars.NIRA_MAX_AI_LEASES || '1' }}
+  NIRA_MAX_DETERMINISTIC_LEASES: ${{ vars.NIRA_MAX_DETERMINISTIC_LEASES || '4' }}
 
 jobs:
   schedule:
@@ -28,6 +30,8 @@ jobs:
         uses: actions/github-script@v7
         env:
           AI_PROVIDER_AVAILABLE: ${{ env.NIRA_AI_PROVIDER_AVAILABLE }}
+          MAX_AI_LEASES: ${{ env.NIRA_MAX_AI_LEASES }}
+          MAX_DETERMINISTIC_LEASES: ${{ env.NIRA_MAX_DETERMINISTIC_LEASES }}
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -48,6 +52,8 @@ jobs:
             const laneFor = issue =>
               /NIRA_EXECUTION_MODE:\s*deterministic-doc-append/i.test(issue.body || '')
                 ? 'DETERMINISTIC' : 'AI';
+            const clientFor = issue =>
+              String(issue.body || '').match(/CLIENT_REPOSITORY:\s*([^\s\n]+)/i)?.[1] || '';
             const labelsFor = issue => new Set(
               (issue.labels || []).map(x => typeof x === 'string' ? x : x.name)
             );
@@ -61,25 +67,45 @@ jobs:
             });
             const activeAi = active.filter(x => laneFor(x) === 'AI').length;
             const activeDeterministic = active.filter(x => laneFor(x) === 'DETERMINISTIC').length;
+            const maxAi = Math.max(1, Math.min(8, Number(process.env.MAX_AI_LEASES || 1)));
+            const maxDeterministic = Math.max(1, Math.min(16, Number(process.env.MAX_DETERMINISTIC_LEASES || 4)));
+            const activeAiRepos = new Set(
+              active.filter(x => laneFor(x) === 'AI').map(clientFor).filter(Boolean)
+            );
             let aiSlots = process.env.AI_PROVIDER_AVAILABLE === 'true'
-              ? Math.max(0, 1 - activeAi) : 0;
-            let deterministicSlots = Math.max(0, 4 - activeDeterministic);
+              ? Math.max(0, maxAi - activeAi) : 0;
+            let deterministicSlots = Math.max(0, maxDeterministic - activeDeterministic);
 
             core.info(
-              'capacity ai=' + activeAi + '/1 available=' + aiSlots +
+              'capacity ai=' + activeAi + '/' + maxAi + ' available=' + aiSlots +
               ' provider=' + process.env.AI_PROVIDER_AVAILABLE +
-              ' deterministic=' + activeDeterministic + '/4 available=' + deterministicSlots
+              ' active_ai_repos=' + [...activeAiRepos].join(',') +
+              ' deterministic=' + activeDeterministic + '/' + maxDeterministic +
+              ' available=' + deterministicSlots
             );
 
             const candidates = work
-              .map(issue => ({ issue, labels: labelsFor(issue), lane: laneFor(issue) }))
+              .map(issue => ({
+                issue,
+                labels: labelsFor(issue),
+                lane: laneFor(issue),
+                clientRepository: clientFor(issue)
+              }))
               .filter(x => x.labels.has('factory:queued'))
               .filter(x => !x.labels.has('factory:leased') && !x.labels.has('factory:in-progress'))
               .filter(x => ![...blocked].some(label => x.labels.has(label)))
               .sort((a, b) => priority(a.labels) - priority(b.labels) || a.issue.number - b.issue.number);
 
             for (const item of candidates) {
+              if (!item.clientRepository) {
+                core.warning('#' + item.issue.number + ': missing CLIENT_REPOSITORY metadata; scheduler will not lease.');
+                continue;
+              }
               if (item.lane === 'AI' && aiSlots <= 0) continue;
+              if (item.lane === 'AI' && activeAiRepos.has(item.clientRepository)) {
+                core.info('#' + item.issue.number + ': AI lease already active for client ' + item.clientRepository);
+                continue;
+              }
               if (item.lane === 'DETERMINISTIC' && deterministicSlots <= 0) continue;
 
               const comments = await github.paginate(github.rest.issues.listComments, {
@@ -135,8 +161,12 @@ jobs:
                     scheduler_run_id: schedulerRun
                   }
                 });
-                if (item.lane === 'AI') aiSlots -= 1;
-                else deterministicSlots -= 1;
+                if (item.lane === 'AI') {
+                  aiSlots -= 1;
+                  activeAiRepos.add(item.clientRepository);
+                } else {
+                  deterministicSlots -= 1;
+                }
                 core.notice('NIRA_SCHEDULER_DISPATCH=REQUESTED issue=' + item.issue.number + ' lane=' + item.lane);
               } catch (error) {
                 await github.rest.issues.createComment({
