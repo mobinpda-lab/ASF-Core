@@ -54,6 +54,7 @@ jobs:
           permission-issues: write
 
       - name: Verify provenance, exact client gates and promote
+        id: promote
         uses: actions/github-script@v7
         env:
           CLIENT_REPOSITORY: ${{ inputs.repository }}
@@ -223,9 +224,16 @@ jobs:
               issue_number: controlIssueNumber,
               labels: ['factory:completed']
             }).catch(error => core.warning('Optional completion label unavailable: ' + error.message));
+            const releasePolicy = JSON.parse(
+              fs.readFileSync('factory/registry/client-release-policy.json', 'utf8')
+            );
+            const releaseEnabled = releasePolicy.clients?.[repository]?.enabled === true;
+            core.setOutput('promoted_main_sha', mergedMain.data.object.sha);
+            core.setOutput('release_enabled', releaseEnabled ? 'true' : 'false');
             core.notice(
               'NIRA_CLIENT_PROMOTION=VERIFIED repo=' + repository +
-              ' pr=' + prNumber + ' main=' + mergedMain.data.object.sha
+              ' pr=' + prNumber + ' main=' + mergedMain.data.object.sha +
+              ' release_enabled=' + releaseEnabled
             );
 
       - name: Upload cross-repository promotion evidence
@@ -235,6 +243,32 @@ jobs:
           name: nira-client-promotion-${{ inputs.pr_number }}-${{ inputs.expected_head_sha }}
           path: nira-client-promotion-evidence.json
           if-no-files-found: error
+
+      - name: Dispatch client-native release after verified promotion
+        if: success() && steps.promote.outputs.release_enabled == 'true'
+        uses: actions/github-script@v7
+        env:
+          CLIENT_REPOSITORY: ${{ inputs.repository }}
+          PROMOTED_MAIN_SHA: ${{ steps.promote.outputs.promoted_main_sha }}
+          CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'nira-client-release.yml',
+              ref: 'main',
+              inputs: {
+                repository: process.env.CLIENT_REPOSITORY,
+                expected_main_sha: process.env.PROMOTED_MAIN_SHA,
+                control_issue_number: process.env.CONTROL_ISSUE_NUMBER
+              }
+            });
+            core.notice(
+              'NIRA_CLIENT_RELEASE_DISPATCH=REQUESTED repo=' +
+              process.env.CLIENT_REPOSITORY + ' main=' + process.env.PROMOTED_MAIN_SHA
+            );
 
       - name: Wake NIRA scheduler after client promotion
         if: success()
