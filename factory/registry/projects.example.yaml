@@ -2,6 +2,67 @@
 # This registry contains control-plane metadata only; product source remains in each client repository.
 schema_version: "1.0"
 projects:
+  - project_id: nira-self-dogfood
+    repository: mobinpda-lab/NIRA
+    provider: github
+    default_branch: main
+    enabled: true
+    owner: mobinpda-lab
+    adapter: generic
+    task_source: github_issues
+    self_dogfood: true
+    branch_policy:
+      prefix: nira/
+      base: main
+    pr_policy:
+      base: main
+      required_label: nira-authorized
+    ci_contract:
+      required_workflow: NIRA CI
+    required_checks:
+      - NIRA CI
+      - NIRA Factory E2E
+      - NIRA Factory Conformance
+      - NIRA Security Gate
+    security_gates:
+      - exact_head
+      - exact_base
+      - lease_fence
+      - no_worker_promotion_authority
+    artifact_requirements:
+      - nira-test-results
+      - nira-factory-e2e-evidence
+      - nira-naming-audit
+    promotion_policy:
+      enabled: true
+      authorization: nira
+      require_exact_head: true
+      require_exact_base: true
+    release_policy:
+      enabled: false
+    worker_contract:
+      adapter: generic
+      workflow_mutation_allowed: false
+      max_files: 8
+    lease_policy:
+      ttl_seconds: 300
+      heartbeat_seconds: 60
+    retry_policy:
+      max_attempts: 2
+    recovery_policy:
+      fail_closed: true
+      bounded_attempts: 2
+    evidence_retention:
+      required: true
+    completion_definition:
+      - exact_head_verified
+      - lease_fence_verified
+      - ci_verified
+      - conformance_verified
+      - security_verified
+      - promotion_verified
+    last_verified_main_sha: 8d068f7b6609b6562058c04010e7b2d34b9f1374
+
   - project_id: arvin-clean
     repository: mobinpda-lab/Arvin-clean
     provider: github

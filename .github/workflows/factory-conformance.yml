@@ -39,6 +39,7 @@ jobs:
             factory/runtime/state_machine.py
             factory/gates/engine.py
             factory/recovery/policy.py
+            factory/feedback/provider_pressure.py
             factory/adapters/generic.py
             factory/registry/projects.example.yaml
             factory/registry/promotion-policy.json
@@ -47,7 +48,7 @@ jobs:
             test -f "$path" || { echo "MISSING_NIRA_CANONICAL_SURFACE=$path"; exit 1; }
           done
           jq -e '.schema_version == "1.1" and .canonical_name == "NIRA" and .repository_name == "NIRA" and .single_factory_authority == true and .historical_identifiers_may_be_active_authority == false' NIRA_IDENTITY.json >/dev/null
-          jq -e '.schema_version == "1.0" and .promotion.enabled == true and (.promotion.max_candidates_per_cycle >= 1)' factory/registry/promotion-policy.json >/dev/null
+          jq -e '.schema_version == "1.1" and .promotion.enabled == true and (.promotion.max_candidates_per_cycle >= 1) and (.promotion.required_workflows | length >= 4)' factory/registry/promotion-policy.json >/dev/null
           grep -q 'L10' README.md || {
             echo 'NIRA L10 status must remain explicit until authentic E2E evidence exists'; exit 1;
           }
@@ -59,9 +60,6 @@ jobs:
           history='docs/history/NIRA_IDENTITY_HISTORY.md'
           test -f "$history"
 
-          # Extract only the intentional historical identifiers from the single
-          # history record, then use git's indexed working tree to avoid walking
-          # .git and large/generated files through Python.
           mapfile -t legacy < <(sed -n 's/^- `\([^`]*\)` — .*/\1/p' "$history")
           ((${#legacy[@]} > 0)) || { echo 'NIRA_LEGACY_IDENTIFIER_LIST_EMPTY'; exit 1; }
 
@@ -81,6 +79,24 @@ jobs:
           fi
           printf 'LEGACY_IDENTITY_FOUND=0\n' > nira-naming-audit.txt
           echo 'LEGACY_IDENTITY_FOUND=0'
+
+      - name: Reject legacy identity in active branch name
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          lowered="$(printf '%s' "$ref" | tr '[:upper:]' '[:lower:]')"
+          history='docs/history/NIRA_IDENTITY_HISTORY.md'
+          mapfile -t legacy < <(sed -n 's/^- `\\([^`]*\\)` — .*/\\1/p' "$history")
+          for pattern in "${legacy[@]}"; do
+            needle="$(printf '%s' "$pattern" | tr '[:upper:]' '[:lower:]')"
+            [[ -n "$needle" ]] || continue
+            if [[ "$lowered" == *"$needle"* ]]; then
+              echo "LEGACY_BRANCH_IDENTITY_FOUND=$ref"
+              exit 1
+            fi
+          done
+          echo "LEGACY_BRANCH_IDENTITY_FOUND=0"
 
       - name: Upload naming audit evidence
         uses: actions/upload-artifact@v4

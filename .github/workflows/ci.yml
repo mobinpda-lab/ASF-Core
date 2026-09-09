@@ -52,14 +52,14 @@ jobs:
           contract_checks = {
               'ci_exact_head_checkout': 'github.event.pull_request.head.sha' in ci and 'fetch-depth: 0' in ci,
               'ci_read_only_contents': 'contents: read' in ci,
-              'orchestrator_main_guard': "github.ref == 'refs/heads/main'" in orch,
+              'orchestrator_main_guard': "Checkout exact main" in orch and "ref: main" in orch and "github.event_name != 'workflow_run'" in orch,
               'orchestrator_dynamic_discovery': 'pulls?state=open&base=main' in orch and 'required_label' in orch,
               'orchestrator_exact_head_guard': 'HEAD_DRIFT' in orch and '.head.sha' in orch,
-              'orchestrator_artifact_guard': 'required_artifact' in orch and 'artifacts' in orch,
+              'orchestrator_artifact_guard': 'required_artifacts' in orch and 'required_artifact' in orch and 'artifacts' in orch,
               'orchestrator_serial_promotion': 'max_candidates_per_cycle' in orch and 'candidate overflow' in orch,
               'orchestrator_squash_merge': 'pulls/$pr/merge' in orch and 'merge_method:"squash"' in orch,
               'orchestrator_exact_main_verification': 'main postcondition mismatch' in orch and 'new_main' in orch,
-              'registry_policy_valid': policy.get('schema_version') == '1.0' and promotion.get('enabled') is True,
+              'registry_policy_valid': policy.get('schema_version') == '1.1' and promotion.get('enabled') is True and len(promotion.get('required_workflows', [])) >= 4,
           }
           checks.extend(contract_checks.items())
 
