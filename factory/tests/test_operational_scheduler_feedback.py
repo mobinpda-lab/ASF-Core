@@ -89,7 +89,8 @@ def test_provider_pressure_releases_lease_and_scheduler_honors_cooldown():
 
 def test_main_closure_revalidates_exact_final_main_without_promotion_authority():
     closure = read(".github/workflows/nira-main-closure.yml")
-    assert "workflows: ['NIRA Production Orchestrator']" in closure
+    assert "push:" in closure and "branches: [main]" in closure
+    assert "workflow_run:" not in closure
     assert "contents: read" in closure
     assert "contents: write" not in closure
     assert "ref: main" in closure
@@ -98,6 +99,8 @@ def test_main_closure_revalidates_exact_final_main_without_promotion_authority()
     assert "nira-main-closure.json" in closure
     assert "observation_state" in closure
     assert "validator_identity" in closure
+    assert "trigger_event" in closure
+    assert "closure_run_id" in closure
     assert "pull-requests: write" not in closure
 
 
