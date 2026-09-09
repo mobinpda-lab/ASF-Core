@@ -183,3 +183,10 @@ def test_scheduler_self_heals_nira_leases_on_main_push():
     assert "LEASE_TTL_EXPIRED" in scheduler
     assert "nira-scheduler-stale-lease-v1:" in scheduler
     assert "NIRA_RECOVERY=REQUEUE" in scheduler
+
+
+def test_orchestrator_explicitly_wakes_canonical_scheduler():
+    orchestrator = read(".github/workflows/production-orchestrator.yml")
+    assert "Wake canonical queue scheduler" in orchestrator
+    assert "nira-queue-scheduler.yml" in orchestrator
+    assert "NIRA_SCHEDULER_WAKE=ORCHESTRATOR" in orchestrator
