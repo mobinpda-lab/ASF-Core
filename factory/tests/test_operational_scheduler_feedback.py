@@ -172,3 +172,14 @@ def test_recovery_has_event_driven_wakes_for_main_and_pr_closure():
     assert "branches: [main]" in recovery
     assert "NIRA_LEASE=HANDED_TO_PR" in recovery
     assert "CLIENT_MAIN_DRIFT_NO_WORKER_PR" in recovery
+
+
+def test_scheduler_self_heals_nira_leases_on_main_push():
+    scheduler = read(".github/workflows/nira-queue-scheduler.yml")
+    assert "push:" in scheduler
+    assert "branches: [main]" in scheduler
+    assert "NIRA_SCHEDULER_SELF_HEAL" in scheduler
+    assert "NIRA_MAIN_DRIFT" in scheduler
+    assert "LEASE_TTL_EXPIRED" in scheduler
+    assert "nira-scheduler-stale-lease-v1:" in scheduler
+    assert "NIRA_RECOVERY=REQUEUE" in scheduler
