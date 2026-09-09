@@ -1,0 +1,98 @@
+name: NIRA Main Closure
+
+on:
+  workflow_run:
+    workflows: ['NIRA Production Orchestrator']
+    types: [completed]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nira-main-closure
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Assert immutable current-main observation
+        id: head
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=1
+          local_sha="$(git rev-parse HEAD)"
+          remote_sha="$(git rev-parse origin/main)"
+          test "$local_sha" = "$remote_sha"
+          echo "sha=$local_sha" >> "$GITHUB_OUTPUT"
+          echo "NIRA_MAIN_CLOSURE_HEAD=$local_sha"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install contract test tooling
+        run: python -m pip install --disable-pip-version-check pytest
+
+      - name: Revalidate NIRA factory contracts on final main
+        run: python -m pytest -q factory/tests --junitxml=nira-main-closure-junit.xml
+
+      - name: Validate canonical identity and promotion policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '.schema_version == "1.1" and .canonical_name == "NIRA" and .repository_name == "NIRA" and .single_factory_authority == true and .historical_identifiers_may_be_active_authority == false' NIRA_IDENTITY.json >/dev/null
+          jq -e '.schema_version == "1.1" and .promotion.enabled == true and (.promotion.required_workflows | length >= 4)' factory/registry/promotion-policy.json >/dev/null
+
+      - name: Emit independently reconstructible closure evidence
+        env:
+          EXACT_MAIN_SHA: ${{ steps.head.outputs.sha }}
+          SOURCE_ORCHESTRATOR_RUN: ${{ github.event.workflow_run.id || '' }}
+          SOURCE_ORCHESTRATOR_URL: ${{ github.event.workflow_run.html_url || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          evidence = {
+              "schema_version": "1.0",
+              "repository": "mobinpda-lab/NIRA",
+              "exact_main_sha": os.environ["EXACT_MAIN_SHA"],
+              "source_orchestrator_run_id": os.environ.get("SOURCE_ORCHESTRATOR_RUN") or None,
+              "source_orchestrator_url": os.environ.get("SOURCE_ORCHESTRATOR_URL") or None,
+              "contract_suite": "factory/tests",
+              "observation_state": "VERIFIED",
+              "confidence": "HIGH",
+              "validator_identity": "nira-main-closure",
+              "promotion_authority": "NIRA Production Orchestrator",
+          }
+          Path("nira-main-closure.json").write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          jq -e '.observation_state == "VERIFIED" and .confidence == "HIGH" and (.exact_main_sha | length) == 40 and .validator_identity == "nira-main-closure"' nira-main-closure.json >/dev/null
+
+      - name: Upload final-main closure evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: nira-main-closure-${{ steps.head.outputs.sha }}
+          path: |
+            nira-main-closure.json
+            nira-main-closure-junit.xml
+          if-no-files-found: error
