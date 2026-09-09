@@ -34,16 +34,14 @@ jobs:
           app-id: ${{ secrets.NIRA_GITHUB_APP_ID }}
           private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
           owner: mobinpda-lab
-          repositories: Arvin-clean,YadNegar,NetworkCenterMonitor
+          repositories: NIRA,Arvin-clean,YadNegar,NetworkCenterMonitor
           permission-actions: read
           permission-contents: read
           permission-pull-requests: read
-          permission-issues: read
+          permission-issues: write
 
       - name: Observe exact-main client health and reconcile monitoring issues
         uses: actions/github-script@v7
-        env:
-          NIRA_TOKEN: ${{ github.token }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
@@ -54,7 +52,6 @@ jobs:
             const release = JSON.parse(
               fs.readFileSync('factory/registry/client-release-policy.json', 'utf8')
             );
-            const nira = new github.constructor({auth: process.env.NIRA_TOKEN});
             const niraOwner = context.repo.owner;
             const niraRepo = context.repo.repo;
             const observations = [];
@@ -82,13 +79,13 @@ jobs:
             async function reconcileFailureIssue(repository, gate, mainSha, run) {
               const short = mainSha.slice(0, 12);
               const title = '[MONITOR] ' + repository + ' ' + gate.name + ' failed at ' + short;
-              const open = await nira.rest.issues.listForRepo({
+              const open = await github.rest.issues.listForRepo({
                 owner: niraOwner, repo: niraRepo, state: 'open', per_page: 100
               });
               const existing = open.data.find(i => !i.pull_request && i.title === title);
               if (run && ['failure','timed_out'].includes(run.conclusion)) {
                 if (!existing) {
-                  await nira.rest.issues.create({
+                  await github.rest.issues.create({
                     owner: niraOwner,
                     repo: niraRepo,
                     title,
@@ -109,7 +106,7 @@ jobs:
                     labels: ['factory', 'automation', 'priority:automation']
                   }).catch(async error => {
                     if (error.status === 422) {
-                      await nira.rest.issues.create({
+                      await github.rest.issues.create({
                         owner: niraOwner, repo: niraRepo, title,
                         body: [
                           '<!-- nira-client-monitor-v1 -->',
@@ -129,12 +126,12 @@ jobs:
               }
 
               if (existing && run?.status === 'completed' && run.conclusion === 'success') {
-                await nira.rest.issues.createComment({
+                await github.rest.issues.createComment({
                   owner: niraOwner, repo: niraRepo, issue_number: existing.number,
                   body: 'NIRA_MONITOR_RECOVERY=VERIFIED\nCLIENT_MAIN_SHA=' + mainSha +
                     '\nRECOVERED_WORKFLOW=' + gate.name + '\nRECOVERY_RUN_ID=' + run.id
                 });
-                await nira.rest.issues.update({
+                await github.rest.issues.update({
                   owner: niraOwner, repo: niraRepo, issue_number: existing.number,
                   state: 'closed', state_reason: 'completed'
                 });
