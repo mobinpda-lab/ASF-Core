@@ -141,3 +141,16 @@ def test_factory_pulse_is_read_only_and_reports_operational_state_not_fake_progr
     assert "oldest_queued_age_seconds" in pulse
     assert "authorized_candidates" in pulse
     assert "percentage" not in pulse.lower()
+
+
+def test_provider_capacity_exhaustion_blocks_ai_lane_without_blind_retry():
+    worker = read(".github/workflows/nira-cross-repo-worker.yml")
+    scheduler = read(".github/workflows/nira-queue-scheduler.yml")
+    assert "NIRA_PROVIDER_CAPACITY_EXHAUSTED" in worker
+    assert "no credits remaining" in worker
+    assert "provider_exhausted" in worker
+    assert "ACTION=BLOCK_AI_LANE_UNTIL_CAPACITY_RESTORED" in worker
+    assert "factory:blocked" in worker
+    assert "providerCapacityExhausted" in scheduler
+    assert "PROVIDER_CAPACITY_EXHAUSTED" in scheduler
+    assert "maxAi = 0" in scheduler
