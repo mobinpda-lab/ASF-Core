@@ -120,14 +120,20 @@ jobs:
               if (!response.ok) {
                 const detail = await response.text();
                 if ([429, 502, 503, 504].includes(response.status)) {
+                  const exhausted = response.status === 429 &&
+                    /no credits remaining|insufficient[_ -]?quota|billing|quota exhausted/i.test(detail);
                   core.setOutput('provider_pressure', 'true');
+                  core.setOutput('provider_exhausted', exhausted ? 'true' : 'false');
                   core.setOutput('provider_status', String(response.status));
                   core.setOutput('provider_retry_after', response.headers.get('retry-after') || '');
-                  throw new Error(`NIRA_PROVIDER_PRESSURE_HTTP_${response.status}: ${detail}`);
+                  throw new Error(
+                    `${exhausted ? 'NIRA_PROVIDER_CAPACITY_EXHAUSTED' : 'NIRA_PROVIDER_PRESSURE_HTTP_' + response.status}: ${detail}`
+                  );
                 }
                 throw new Error(`OPENAI_HTTP_${response.status}: ${detail}`);
               }
               core.setOutput('provider_pressure', 'false');
+              core.setOutput('provider_exhausted', 'false');
               return response.json();
             }
             function outputText(result) {
@@ -333,6 +339,7 @@ jobs:
           CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}
           PROVIDER_STATUS: ${{ steps.execute.outputs.provider_status }}
           PROVIDER_RETRY_AFTER: ${{ steps.execute.outputs.provider_retry_after }}
+          PROVIDER_EXHAUSTED: ${{ steps.execute.outputs.provider_exhausted }}
           LEASE_ID: ${{ inputs.lease_id }}
         with:
           github-token: ${{ github.token }}
@@ -341,39 +348,62 @@ jobs:
             const repo = context.repo.repo;
             const issueNumber = Number(process.env.CONTROL_ISSUE_NUMBER);
             const status = Number(process.env.PROVIDER_STATUS || 0);
+            const exhausted = process.env.PROVIDER_EXHAUSTED === 'true';
             const retryHeader = Number(process.env.PROVIDER_RETRY_AFTER || 0);
-            const defaultSeconds = status === 429 ? 60 : 30;
-            const cooldownSeconds = Math.max(15, Math.min(
-              Number.isFinite(retryHeader) && retryHeader > 0 ? retryHeader : defaultSeconds,
-              300
-            ));
-            const until = new Date(Date.now() + cooldownSeconds * 1000).toISOString();
             await github.rest.issues.removeLabel({
               owner, repo, issue_number: issueNumber, name: 'factory:leased'
             }).catch(() => {});
             await github.rest.issues.removeLabel({
               owner, repo, issue_number: issueNumber, name: 'factory:in-progress'
             }).catch(() => {});
-            await github.rest.issues.addLabels({
-              owner, repo, issue_number: issueNumber, labels: ['factory:queued']
-            });
-            await github.rest.issues.createComment({
-              owner, repo, issue_number: issueNumber,
-              body: [
-                '<!-- nira-provider-pressure-v1 -->',
-                'NIRA_PROVIDER_PRESSURE=TRANSIENT',
-                'HTTP_STATUS=' + status,
-                'LEASE_ID=' + process.env.LEASE_ID,
-                'NIRA_PROVIDER_COOLDOWN_SECONDS=' + cooldownSeconds,
-                'NIRA_PROVIDER_COOLDOWN_UNTIL=' + until,
-                'ACTION=RELEASE_LEASE_AND_REQUEUE',
-                'PRODUCT_FAILURE_CLAIMED=false'
-              ].join('\n')
-            });
+
+            if (exhausted) {
+              await github.rest.issues.removeLabel({
+                owner, repo, issue_number: issueNumber, name: 'factory:queued'
+              }).catch(() => {});
+              await github.rest.issues.addLabels({
+                owner, repo, issue_number: issueNumber, labels: ['factory:blocked']
+              });
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: issueNumber,
+                body: [
+                  '<!-- nira-provider-capacity-v1 -->',
+                  'NIRA_PROVIDER_CAPACITY=EXHAUSTED',
+                  'HTTP_STATUS=' + status,
+                  'LEASE_ID=' + process.env.LEASE_ID,
+                  'ACTION=BLOCK_AI_LANE_UNTIL_CAPACITY_RESTORED',
+                  'PRODUCT_FAILURE_CLAIMED=false'
+                ].join('\n')
+              });
+              core.notice('NIRA_PROVIDER_CAPACITY=EXHAUSTED ai_lane_blocked=true');
+            } else {
+              const defaultSeconds = status === 429 ? 60 : 30;
+              const cooldownSeconds = Math.max(15, Math.min(
+                Number.isFinite(retryHeader) && retryHeader > 0 ? retryHeader : defaultSeconds,
+                300
+              ));
+              const until = new Date(Date.now() + cooldownSeconds * 1000).toISOString();
+              await github.rest.issues.addLabels({
+                owner, repo, issue_number: issueNumber, labels: ['factory:queued']
+              });
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: issueNumber,
+                body: [
+                  '<!-- nira-provider-pressure-v1 -->',
+                  'NIRA_PROVIDER_PRESSURE=TRANSIENT',
+                  'HTTP_STATUS=' + status,
+                  'LEASE_ID=' + process.env.LEASE_ID,
+                  'NIRA_PROVIDER_COOLDOWN_SECONDS=' + cooldownSeconds,
+                  'NIRA_PROVIDER_COOLDOWN_UNTIL=' + until,
+                  'ACTION=RELEASE_LEASE_AND_REQUEUE',
+                  'PRODUCT_FAILURE_CLAIMED=false'
+                ].join('\n')
+              });
+              core.notice('NIRA_PROVIDER_PRESSURE=LEASE_RELEASED cooldown_until=' + until);
+            }
             await github.rest.actions.createWorkflowDispatch({
               owner, repo, workflow_id: 'nira-queue-scheduler.yml', ref: 'main'
             });
-            core.notice('NIRA_PROVIDER_PRESSURE=LEASE_RELEASED cooldown_until=' + until);
 
       - name: Fail closed on non-provider worker failure
         if: steps.execute.outcome == 'failure' && steps.execute.outputs.provider_pressure != 'true'
