@@ -41,7 +41,11 @@ jobs:
             factory/recovery/policy.py
             factory/feedback/provider_pressure.py
             factory/scheduling/policy.py
+            factory/scheduling/adaptive.py
+            factory/intelligence/failure.py
+            factory/routing/impact.py
             .github/workflows/nira-queue-scheduler.yml
+            .github/workflows/nira-impact-plan.yml
             .github/workflows/nira-failure-feedback.yml
             .github/workflows/nira-main-closure.yml
             .github/workflows/nira-factory-pulse.yml
