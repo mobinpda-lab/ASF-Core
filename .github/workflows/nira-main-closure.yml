@@ -1,9 +1,6 @@
 name: NIRA Main Closure
 
 on:
-  workflow_run:
-    workflows: ['NIRA Production Orchestrator']
-    types: [completed]
   push:
     branches: [main]
   workflow_dispatch:
@@ -17,7 +14,6 @@ concurrency:
 
 jobs:
   verify:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -60,8 +56,8 @@ jobs:
       - name: Emit independently reconstructible closure evidence
         env:
           EXACT_MAIN_SHA: ${{ steps.head.outputs.sha }}
-          SOURCE_ORCHESTRATOR_RUN: ${{ github.event.workflow_run.id || '' }}
-          SOURCE_ORCHESTRATOR_URL: ${{ github.event.workflow_run.html_url || '' }}
+          TRIGGER_EVENT: ${{ github.event_name }}
+          CLOSURE_RUN_ID: ${{ github.run_id }}
         shell: bash
         run: |
           set -euo pipefail
@@ -73,8 +69,8 @@ jobs:
               "schema_version": "1.0",
               "repository": "mobinpda-lab/NIRA",
               "exact_main_sha": os.environ["EXACT_MAIN_SHA"],
-              "source_orchestrator_run_id": os.environ.get("SOURCE_ORCHESTRATOR_RUN") or None,
-              "source_orchestrator_url": os.environ.get("SOURCE_ORCHESTRATOR_URL") or None,
+              "trigger_event": os.environ["TRIGGER_EVENT"],
+              "closure_run_id": int(os.environ["CLOSURE_RUN_ID"]),
               "contract_suite": "factory/tests",
               "observation_state": "VERIFIED",
               "confidence": "HIGH",
