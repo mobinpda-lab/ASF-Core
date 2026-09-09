@@ -162,3 +162,13 @@ def test_production_orchestrator_uses_supported_graphql_ready_transition():
     assert "gh api graphql" in orchestrator
     assert "/ready_for_review" not in orchestrator
     assert "node_id" in orchestrator
+
+
+def test_recovery_has_event_driven_wakes_for_main_and_pr_closure():
+    recovery = read(".github/workflows/nira-recovery-sweep.yml")
+    assert "pull_request:" in recovery
+    assert "types: [closed]" in recovery
+    assert "push:" in recovery
+    assert "branches: [main]" in recovery
+    assert "NIRA_LEASE=HANDED_TO_PR" in recovery
+    assert "CLIENT_MAIN_DRIFT_NO_WORKER_PR" in recovery
