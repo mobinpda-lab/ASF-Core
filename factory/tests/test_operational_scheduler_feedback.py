@@ -25,8 +25,14 @@ def test_scheduler_separates_ai_and_deterministic_capacity():
     assert "NIRA_AI_PROVIDER_AVAILABLE" in scheduler
     assert "activeAi" in scheduler
     assert "activeDeterministic" in scheduler
-    assert "Math.max(0, 1 - activeAi)" in scheduler
+    assert "maxAi" in scheduler
+    assert "HEALTHY_BACKLOG" in scheduler
+    assert "QUALITY_DEGRADED" in scheduler
+    assert "PROVIDER_PRESSURE" in scheduler
+    assert "Math.max(0, maxAi - activeAi)" in scheduler
     assert "Math.max(0, 4 - activeDeterministic)" in scheduler
+    assert "activeAiRepos" in scheduler
+    assert "active AI lease already owns client" in scheduler
     assert "priority:release-blocker" in scheduler
     assert "priority:core" in scheduler
 
