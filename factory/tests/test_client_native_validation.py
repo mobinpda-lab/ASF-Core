@@ -86,3 +86,14 @@ def test_client_promotion_persists_truth_independent_of_optional_issue_metadata(
     assert "Completion comment failed after verified merge" in promotion
     assert "Optional completion label unavailable" in promotion
     assert "Upload cross-repository promotion evidence" in promotion
+
+
+def test_issue_frontdoor_resolves_exact_client_head_and_never_promotes():
+    workflow = read(".github/workflows/nira-client-validation-request.yml")
+    assert "NIRA_VALIDATION_REQUEST: true" in workflow
+    assert "id: resolve" in workflow
+    assert "steps.resolve.outputs.head_sha" in workflow
+    assert "nira-client-validation.yml" in workflow
+    assert "promote: 'false'" in workflow
+    assert "FORK_REJECTED" in workflow
+    assert "pulls.merge" not in workflow

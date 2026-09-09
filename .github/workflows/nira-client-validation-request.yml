@@ -1,0 +1,105 @@
+name: NIRA Client Validation Request
+
+on:
+  issues:
+    types: [opened, reopened, edited]
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+concurrency:
+  group: nira-client-validation-request-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  request:
+    if: github.event.issue.pull_request == null && contains(github.event.issue.body || '', 'NIRA_VALIDATION_REQUEST: true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout canonical validation registry
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Mint read-only client token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.NIRA_GITHUB_APP_ID }}
+          private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
+          owner: mobinpda-lab
+          repositories: Arvin-clean,YadNegar,NetworkCenterMonitor
+          permission-actions: read
+          permission-contents: read
+          permission-pull-requests: read
+
+      - name: Resolve exact client PR and dispatch read-only validation
+        id: resolve
+        uses: actions/github-script@v7
+        env:
+          REQUEST_BODY: ${{ github.event.issue.body }}
+          CONTROL_ISSUE_NUMBER: ${{ github.event.issue.number }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const body = process.env.REQUEST_BODY || '';
+            const repository = body.match(/CLIENT_REPOSITORY:\s*([^\s\n]+)/i)?.[1] || '';
+            const prNumber = Number(body.match(/CLIENT_PR:\s*(\d+)/i)?.[1] || '0');
+            const stage = (body.match(/VALIDATION_STAGE:\s*(fast|heavy|all)/i)?.[1] || 'all').toLowerCase();
+            const policy = JSON.parse(fs.readFileSync('factory/registry/client-validation-policy.json', 'utf8'));
+            if (!policy.clients?.[repository]) throw new Error('NIRA_VALIDATION_REQUEST=UNREGISTERED_CLIENT');
+            if (!Number.isInteger(prNumber) || prNumber <= 0) throw new Error('NIRA_VALIDATION_REQUEST=INVALID_PR');
+            const [owner, repo] = repository.split('/');
+            const pr = await github.rest.pulls.get({owner, repo, pull_number: prNumber});
+            if (pr.data.state !== 'open') throw new Error('NIRA_VALIDATION_REQUEST=PR_NOT_OPEN');
+            if (pr.data.base.ref !== 'main') throw new Error('NIRA_VALIDATION_REQUEST=BASE_NOT_MAIN');
+            if (pr.data.head.repo?.full_name !== repository) throw new Error('NIRA_VALIDATION_REQUEST=FORK_REJECTED');
+            core.setOutput('repository', repository);
+            core.setOutput('pr_number', String(prNumber));
+            core.setOutput('head_sha', pr.data.head.sha);
+            core.setOutput('stage', stage);
+
+      - name: Dispatch audit-only validator through NIRA authority
+        uses: actions/github-script@v7
+        env:
+          REPOSITORY: ${{ steps.resolve.outputs.repository }}
+          PR_NUMBER: ${{ steps.resolve.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+          STAGE: ${{ steps.resolve.outputs.stage }}
+          CONTROL_ISSUE_NUMBER: ${{ github.event.issue.number }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'nira-client-validation.yml',
+              ref: 'main',
+              inputs: {
+                repository: process.env.REPOSITORY,
+                pr_number: process.env.PR_NUMBER,
+                expected_head_sha: process.env.HEAD_SHA,
+                control_issue_number: process.env.CONTROL_ISSUE_NUMBER,
+                stage: process.env.STAGE,
+                promote: 'false'
+              }
+            });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.CONTROL_ISSUE_NUMBER),
+              body: [
+                '<!-- nira-client-validation-request-v1 -->',
+                'NIRA_CLIENT_VALIDATION_REQUEST=DISPATCHED',
+                'CLIENT_REPOSITORY=' + process.env.REPOSITORY,
+                'CLIENT_PR=' + process.env.PR_NUMBER,
+                'EXPECTED_HEAD_SHA=' + process.env.HEAD_SHA,
+                'VALIDATION_STAGE=' + process.env.STAGE,
+                'PROMOTION_REQUESTED=false'
+              ].join('\n')
+            });
