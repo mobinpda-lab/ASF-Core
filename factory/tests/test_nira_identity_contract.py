@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 
@@ -28,3 +29,23 @@ def test_history_isolated_to_single_record() -> None:
 def test_active_identity_contract_contains_no_legacy_factory_name() -> None:
     identity = (ROOT / "NIRA_IDENTITY.json").read_text(encoding="utf-8")
     assert "ASF" not in identity
+
+
+def test_no_historical_identifiers_escape_the_single_history_record() -> None:
+    history_rel = Path("docs/history/NIRA_IDENTITY_HISTORY.md")
+    history = (ROOT / history_rel).read_text(encoding="utf-8")
+    identifiers = []
+    for line in history.splitlines():
+        if line.startswith("- `") and " — " in line:
+            identifiers.append(line.split("`", 2)[1])
+    assert identifiers
+
+    for identifier in identifiers:
+        result = subprocess.run(
+            ["git", "grep", "-n", "-F", "--", identifier, ":!docs/history/NIRA_IDENTITY_HISTORY.md"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 1, result.stdout
