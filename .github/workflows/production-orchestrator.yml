@@ -38,6 +38,19 @@ jobs:
           ref: main
           fetch-depth: 0
 
+      - name: Wake canonical queue scheduler
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'nira-queue-scheduler.yml',
+              ref: 'main'
+            });
+            core.notice('NIRA_SCHEDULER_WAKE=ORCHESTRATOR');
+
       - name: Discover and promote registry-authorized candidates
         env:
           GH_TOKEN: ${{ github.token }}
