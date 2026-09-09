@@ -51,3 +51,9 @@ def test_failure_feedback_is_exact_head_bounded_and_scope_aware():
     assert "filename.startsWith('.github/workflows/')" in feedback
     assert "factory/registry/promotion-policy.json" in feedback
     assert "workflow_id: 'nira-intake-queue.yml'" in feedback
+
+
+def test_production_orchestrator_shell_loop_stays_inside_yaml_run_block():
+    orchestrator = read(".github/workflows/production-orchestrator.yml")
+    assert "\n          done < <(jq -c '.[]' <<<\"$candidates\")\n" in orchestrator
+    assert "\ndone < <(jq -c '.[]' <<<\"$candidates\")\n" not in orchestrator
