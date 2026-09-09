@@ -58,6 +58,9 @@ jobs:
             factory/registry/projects.example.yaml
             factory/registry/promotion-policy.json
             factory/registry/client-validation-policy.json
+            .github/workflows/nira-client-monitor.yml
+            .github/workflows/nira-client-release.yml
+            factory/registry/client-release-policy.json
             .github/workflows/nira-client-validation.yml
             .github/workflows/nira-client-validation-request.yml
             .github/workflows/nira-client-promotion.yml

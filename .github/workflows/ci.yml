@@ -56,7 +56,12 @@ jobs:
               'orchestrator_dynamic_discovery': 'pulls?state=open&base=main' in orch and 'required_label' in orch,
               'orchestrator_exact_head_guard': 'HEAD_DRIFT' in orch and '.head.sha' in orch,
               'orchestrator_artifact_guard': 'required_artifacts' in orch and 'required_artifact' in orch and 'artifacts' in orch,
-              'orchestrator_serial_promotion': 'max_candidates_per_cycle' in orch and 'candidate overflow' in orch,
+              'orchestrator_serial_promotion': (
+                  'max_candidates_per_cycle' in orch
+                  and "'.[0:$max]'" in orch
+                  and 'SELECTION selected=' in orch
+                  and 'break' in orch
+              ),
               'orchestrator_squash_merge': 'pulls/$pr/merge' in orch and 'merge_method:"squash"' in orch,
               'orchestrator_exact_main_verification': 'main postcondition mismatch' in orch and 'new_main' in orch,
               'registry_policy_valid': policy.get('schema_version') == '1.1' and promotion.get('enabled') is True and len(promotion.get('required_workflows', [])) >= 4,

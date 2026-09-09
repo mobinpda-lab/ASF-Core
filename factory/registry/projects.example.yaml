@@ -95,7 +95,9 @@ projects:
       require_exact_head: true
       require_exact_base: true
     release_policy:
-      enabled: false
+      enabled: true
+      mode: client_native
+      policy: factory/registry/client-release-policy.json
     worker_contract:
       adapter: nira-arvin
     lease_policy:
@@ -112,6 +114,7 @@ projects:
       - exact_head_verified
       - ci_verified
       - promotion_verified
+      - release_verified
     last_verified_main_sha: a526e81c638b699a78c003073ef27b1346e49cd8
 
   - project_id: yadnegar
@@ -145,7 +148,9 @@ projects:
       require_exact_head: true
       require_exact_base: true
     release_policy:
-      enabled: false
+      enabled: true
+      mode: client_native
+      policy: factory/registry/client-release-policy.json
     worker_contract:
       adapter: generic
     lease_policy:
@@ -162,6 +167,7 @@ projects:
       - exact_head_verified
       - ci_verified
       - promotion_verified
+      - release_verified
     last_verified_main_sha: 46fa1f6c9027383aa02c6d19e0d8f0eecee40ed9
 
   - project_id: network-center-monitor
@@ -197,6 +203,7 @@ projects:
       require_exact_base: true
     release_policy:
       enabled: false
+      reason: no_registered_client_release_workflow
     worker_contract:
       adapter: generic
     lease_policy:

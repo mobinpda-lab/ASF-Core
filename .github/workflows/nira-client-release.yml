@@ -1,0 +1,224 @@
+name: NIRA Client Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: 'Registered client repository owner/name'
+        required: true
+        type: string
+      expected_main_sha:
+        description: 'Exact promoted client main SHA'
+        required: true
+        type: string
+      control_issue_number:
+        description: 'NIRA control issue owning promotion/release provenance'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: nira-client-release-${{ inputs.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout canonical NIRA release registry
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Mint scoped client release token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.NIRA_GITHUB_APP_ID }}
+          private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
+          owner: mobinpda-lab
+          repositories: Arvin-clean,YadNegar,NetworkCenterMonitor
+          permission-actions: write
+          permission-contents: read
+          permission-pull-requests: read
+
+      - name: Dispatch client-owned release chain and collect exact-main evidence
+        id: release
+        uses: actions/github-script@v7
+        env:
+          CLIENT_REPOSITORY: ${{ inputs.repository }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const policy = JSON.parse(fs.readFileSync('factory/registry/client-release-policy.json', 'utf8'));
+            const repository = process.env.CLIENT_REPOSITORY;
+            const expectedMain = process.env.EXPECTED_MAIN_SHA;
+            const controlIssue = Number(process.env.CONTROL_ISSUE_NUMBER);
+            if (!/^[0-9a-f]{40}$/.test(expectedMain)) throw new Error('NIRA_RELEASE=INVALID_EXPECTED_MAIN');
+            if (!Number.isInteger(controlIssue) || controlIssue <= 0) throw new Error('NIRA_RELEASE=INVALID_CONTROL_ISSUE');
+
+            const config = policy.clients?.[repository];
+            if (!config) throw new Error('NIRA_RELEASE=UNREGISTERED_CLIENT');
+            if (!config.enabled) throw new Error('NIRA_RELEASE=DISABLED:' + String(config.reason || 'policy'));
+            const [owner, repo] = repository.split('/');
+            const ref = await github.rest.git.getRef({owner, repo, ref: 'heads/main'});
+            if (ref.data.object.sha !== expectedMain) {
+              throw new Error('NIRA_RELEASE=MAIN_DRIFT expected=' + expectedMain + ' observed=' + ref.data.object.sha);
+            }
+
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+            async function snapshot(workflowFile) {
+              const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+                owner, repo, workflow_id: workflowFile, branch: 'main', per_page: 100
+              });
+              return runs.reduce((m, r) => Math.max(m, Number(r.id || 0)), 0);
+            }
+            async function dispatchAndWait(item) {
+              const before = await snapshot(item.file);
+              await github.rest.actions.createWorkflowDispatch({
+                owner, repo, workflow_id: item.file, ref: 'main'
+              });
+              for (let attempt = 1; attempt <= 120; attempt++) {
+                const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+                  owner, repo, workflow_id: item.file, branch: 'main', per_page: 100
+                });
+                const run = runs
+                  .filter(r => Number(r.id) > before)
+                  .filter(r => r.head_sha === expectedMain)
+                  .sort((a,b) => b.id - a.id)[0];
+                if (run?.status === 'completed') {
+                  if (run.conclusion !== 'success') {
+                    throw new Error(
+                      'NIRA_RELEASE=CLIENT_WORKFLOW_FAILED:' + item.name +
+                      ':run=' + run.id + ':conclusion=' + run.conclusion
+                    );
+                  }
+                  return {
+                    name: item.name,
+                    workflow: item.file,
+                    run_id: run.id,
+                    head_sha: run.head_sha,
+                    conclusion: run.conclusion,
+                    html_url: run.html_url
+                  };
+                }
+                if (attempt === 1 || attempt % 12 === 0) {
+                  core.info('Waiting release workflow=' + item.name + ' attempt=' + attempt);
+                }
+                await sleep(10000);
+              }
+              throw new Error('NIRA_RELEASE=CLIENT_WORKFLOW_TIMEOUT:' + item.name);
+            }
+
+            const execution = [];
+            for (const prereq of (config.prerequisite_workflows || [])) {
+              execution.push(await dispatchAndWait(prereq));
+              const stillMain = await github.rest.git.getRef({owner, repo, ref: 'heads/main'});
+              if (stillMain.data.object.sha !== expectedMain) {
+                throw new Error('NIRA_RELEASE=MAIN_MOVED_AFTER_PREREQUISITE');
+              }
+            }
+            execution.push(await dispatchAndWait(config.workflow));
+
+            const afterReleaseMain = await github.rest.git.getRef({owner, repo, ref: 'heads/main'});
+            if (afterReleaseMain.data.object.sha !== expectedMain) {
+              throw new Error('NIRA_RELEASE=MAIN_MOVED_DURING_RELEASE');
+            }
+
+            if (config.post_release_validation?.dispatchable) {
+              execution.push(await dispatchAndWait(config.post_release_validation));
+            }
+
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner, repo, per_page: 100
+            });
+            let exactRelease = null;
+            for (const release of releases) {
+              try {
+                const tagRef = await github.rest.git.getRef({
+                  owner, repo, ref: 'tags/' + release.tag_name
+                });
+                let sha = tagRef.data.object.sha;
+                if (tagRef.data.object.type === 'tag') {
+                  const tag = await github.rest.git.getTag({owner, repo, tag_sha: sha});
+                  sha = tag.data.object.sha;
+                }
+                if (sha === expectedMain) {
+                  exactRelease = {
+                    id: release.id,
+                    tag_name: release.tag_name,
+                    html_url: release.html_url,
+                    prerelease: release.prerelease,
+                    draft: release.draft,
+                    target_sha: sha
+                  };
+                  break;
+                }
+              } catch (error) {
+                core.warning('Release tag observation failed for ' + release.tag_name + ': ' + error.message);
+              }
+            }
+            if (!exactRelease) {
+              throw new Error('NIRA_RELEASE=NO_GITHUB_RELEASE_FOR_EXACT_MAIN');
+            }
+
+            const evidence = {
+              schema_version: '1.0',
+              authority: 'NIRA Client Release',
+              mode: 'client-native-release-orchestration',
+              repository,
+              control_issue_number: controlIssue,
+              exact_main_sha: expectedMain,
+              release_semantics: config.release_semantics,
+              workflow_execution: execution,
+              github_release: exactRelease,
+              observation_state: 'VERIFIED',
+              confidence: 'HIGH',
+              observed_at: new Date().toISOString()
+            };
+            fs.writeFileSync('nira-client-release-evidence.json', JSON.stringify(evidence, null, 2) + '\n');
+            core.setOutput('release_tag', exactRelease.tag_name);
+            core.notice(
+              'NIRA_RELEASE=VERIFIED repo=' + repository +
+              ' main=' + expectedMain + ' tag=' + exactRelease.tag_name
+            );
+
+      - name: Upload client release evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nira-client-release-${{ inputs.repository }}-${{ inputs.expected_main_sha }}
+          path: nira-client-release-evidence.json
+          if-no-files-found: error
+
+      - name: Record release evidence on NIRA control issue
+        if: success()
+        uses: actions/github-script@v7
+        env:
+          CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}
+          CLIENT_REPOSITORY: ${{ inputs.repository }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.CONTROL_ISSUE_NUMBER),
+              body: [
+                '<!-- nira-client-release-v1 -->',
+                'NIRA_CLIENT_RELEASE=VERIFIED',
+                'CLIENT_REPOSITORY=' + process.env.CLIENT_REPOSITORY,
+                'EXACT_MAIN_SHA=' + process.env.EXPECTED_MAIN_SHA,
+                'RELEASE_TAG=' + process.env.RELEASE_TAG
+              ].join('\n')
+            });

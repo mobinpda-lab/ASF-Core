@@ -1,0 +1,211 @@
+name: NIRA Client Monitor
+
+on:
+  workflow_run:
+    workflows: ['NIRA Client Release', 'NIRA Client Promotion']
+    types: [completed]
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: nira-client-monitor
+  cancel-in-progress: true
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout canonical client policies
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Mint read-only client observation token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.NIRA_GITHUB_APP_ID }}
+          private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
+          owner: mobinpda-lab
+          repositories: NIRA,Arvin-clean,YadNegar,NetworkCenterMonitor
+          permission-actions: read
+          permission-contents: read
+          permission-pull-requests: read
+          permission-issues: write
+
+      - name: Observe exact-main client health and reconcile monitoring issues
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const validation = JSON.parse(
+              fs.readFileSync('factory/registry/client-validation-policy.json', 'utf8')
+            );
+            const release = JSON.parse(
+              fs.readFileSync('factory/registry/client-release-policy.json', 'utf8')
+            );
+            const niraOwner = context.repo.owner;
+            const niraRepo = context.repo.repo;
+            const observations = [];
+
+            async function exactReleaseForMain(owner, repo, mainSha) {
+              const releases = await github.paginate(github.rest.repos.listReleases, {
+                owner, repo, per_page: 50
+              });
+              for (const item of releases) {
+                try {
+                  const ref = await github.rest.git.getRef({owner, repo, ref: 'tags/' + item.tag_name});
+                  let sha = ref.data.object.sha;
+                  if (ref.data.object.type === 'tag') {
+                    const tag = await github.rest.git.getTag({owner, repo, tag_sha: sha});
+                    sha = tag.data.object.sha;
+                  }
+                  if (sha === mainSha) {
+                    return {tag_name: item.tag_name, release_id: item.id, html_url: item.html_url};
+                  }
+                } catch (_) {}
+              }
+              return null;
+            }
+
+            async function reconcileFailureIssue(repository, gate, mainSha, run) {
+              const short = mainSha.slice(0, 12);
+              const title = '[MONITOR] ' + repository + ' ' + gate.name + ' failed at ' + short;
+              const open = await github.rest.issues.listForRepo({
+                owner: niraOwner, repo: niraRepo, state: 'open', per_page: 100
+              });
+              const existing = open.data.find(i =>
+                !i.pull_request &&
+                String(i.body || '').includes('<!-- nira-client-monitor-v1 -->') &&
+                String(i.body || '').includes('CLIENT_REPOSITORY: ' + repository) &&
+                String(i.body || '').includes('FAILED_WORKFLOW: ' + gate.name)
+              );
+              if (run && ['failure','timed_out'].includes(run.conclusion)) {
+                if (!existing) {
+                  await github.rest.issues.create({
+                    owner: niraOwner,
+                    repo: niraRepo,
+                    title,
+                    body: [
+                      '<!-- nira-client-monitor-v1 -->',
+                      'Persistent exact-main client validation failure observed by NIRA.',
+                      '',
+                      'CLIENT_REPOSITORY: ' + repository,
+                      'CLIENT_MAIN_SHA: ' + mainSha,
+                      'FAILED_WORKFLOW: ' + gate.name,
+                      'FAILED_RUN_ID: ' + run.id,
+                      'FAILED_RUN_URL: ' + run.html_url,
+                      'FAILED_CONCLUSION: ' + run.conclusion,
+                      'NIRA_WORKER_ROLE: RECOVERY',
+                      '',
+                      'This is monitoring evidence, not a completion claim. Triage must classify the failure before any bounded repair is queued.'
+                    ].join('\n'),
+                    labels: ['factory', 'automation', 'priority:automation']
+                  }).catch(async error => {
+                    if (error.status === 422) {
+                      await github.rest.issues.create({
+                        owner: niraOwner, repo: niraRepo, title,
+                        body: [
+                          '<!-- nira-client-monitor-v1 -->',
+                          'CLIENT_REPOSITORY: ' + repository,
+                          'CLIENT_MAIN_SHA: ' + mainSha,
+                          'FAILED_WORKFLOW: ' + gate.name,
+                          'FAILED_RUN_ID: ' + run.id,
+                          'FAILED_RUN_URL: ' + run.html_url,
+                          'FAILED_CONCLUSION: ' + run.conclusion,
+                          'NIRA_WORKER_ROLE: RECOVERY'
+                        ].join('\n')
+                      });
+                    } else throw error;
+                  });
+                } else if (!String(existing.body || '').includes('CLIENT_MAIN_SHA: ' + mainSha)) {
+                  await github.rest.issues.createComment({
+                    owner: niraOwner, repo: niraRepo, issue_number: existing.number,
+                    body: [
+                      'NIRA_MONITOR_FAILURE=OBSERVED_AGAIN',
+                      'CLIENT_MAIN_SHA=' + mainSha,
+                      'FAILED_WORKFLOW=' + gate.name,
+                      'FAILED_RUN_ID=' + run.id,
+                      'FAILED_CONCLUSION=' + run.conclusion
+                    ].join('\n')
+                  });
+                }
+                return;
+              }
+
+              if (existing && run?.status === 'completed' && run.conclusion === 'success') {
+                await github.rest.issues.createComment({
+                  owner: niraOwner, repo: niraRepo, issue_number: existing.number,
+                  body: 'NIRA_MONITOR_RECOVERY=VERIFIED\nCLIENT_MAIN_SHA=' + mainSha +
+                    '\nRECOVERED_WORKFLOW=' + gate.name + '\nRECOVERY_RUN_ID=' + run.id
+                });
+                await github.rest.issues.update({
+                  owner: niraOwner, repo: niraRepo, issue_number: existing.number,
+                  state: 'closed', state_reason: 'completed'
+                });
+              }
+            }
+
+            for (const [repository, config] of Object.entries(validation.clients || {})) {
+              const [owner, repo] = repository.split('/');
+              const ref = await github.rest.git.getRef({owner, repo, ref: 'heads/main'});
+              const mainSha = ref.data.object.sha;
+              const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+                owner, repo, head_sha: mainSha, per_page: 100
+              });
+              const gates = [...(config.fast || []), ...(config.heavy || [])];
+              const gateEvidence = [];
+              for (const gate of gates) {
+                const run = runs
+                  .filter(r => r.name === gate.name && r.head_sha === mainSha)
+                  .sort((a,b) => b.id - a.id)[0] || null;
+                gateEvidence.push({
+                  name: gate.name,
+                  run_id: run?.id || null,
+                  status: run?.status || 'missing',
+                  conclusion: run?.conclusion || null,
+                  html_url: run?.html_url || null
+                });
+                await reconcileFailureIssue(repository, gate, mainSha, run);
+              }
+
+              const releaseConfig = release.clients?.[repository] || null;
+              const exactRelease = releaseConfig?.enabled
+                ? await exactReleaseForMain(owner, repo, mainSha)
+                : null;
+              observations.push({
+                repository,
+                exact_main_sha: mainSha,
+                gates: gateEvidence,
+                release_policy_enabled: releaseConfig?.enabled === true,
+                exact_main_release: exactRelease,
+                observation_state: 'OBSERVED'
+              });
+            }
+
+            fs.writeFileSync(
+              'nira-client-monitor.json',
+              JSON.stringify({
+                schema_version: '1.0',
+                authority: 'NIRA Client Monitor',
+                observations,
+                mutation_authority: 'NIRA_ISSUE_RECONCILIATION_ONLY',
+                collected_at: new Date().toISOString()
+              }, null, 2) + '\n'
+            );
+            core.notice('NIRA_CLIENT_MONITOR=OBSERVED clients=' + observations.length);
+
+      - name: Upload monitoring evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: nira-client-monitor-${{ github.run_id }}
+          path: nira-client-monitor.json
+          if-no-files-found: error
