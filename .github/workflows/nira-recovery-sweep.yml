@@ -1,6 +1,9 @@
 name: NIRA Recovery Sweep
 
 on:
+  workflow_run:
+    workflows: ['NIRA Cross-Repository Worker', 'NIRA Deterministic Documentation Worker']
+    types: [completed]
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
@@ -8,6 +11,7 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: write
 
 concurrency:
   group: nira-recovery-sweep
@@ -17,36 +21,109 @@ jobs:
   recovery:
     runs-on: ubuntu-latest
     steps:
-      - name: Detect stale queued/leased work
+      - name: Reconcile active leases, worker PRs and stale exact-main state
         uses: actions/github-script@v7
         with:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const now = Date.now();
-            const ttlMs = 5 * 60 * 1000;
-            const marker = '<!-- nira-lease-v1 -->';
             const issues = await github.paginate(github.rest.issues.listForRepo, {
               owner, repo, state: 'open', labels: 'factory:leased', per_page: 100
             });
-            for (const issue of issues) {
+            let wakeScheduler = false;
+
+            for (const issue of issues.filter(x => !x.pull_request)) {
               const comments = await github.paginate(github.rest.issues.listComments, {
                 owner, repo, issue_number: issue.number, per_page: 100
               });
-              const leases = comments.filter(c => c.body && c.body.includes(marker));
-              const latest = leases.sort((a,b) => new Date(b.created_at) - new Date(a.created_at))[0];
-              if (!latest) continue;
-              if (now - new Date(latest.created_at).getTime() <= ttlMs) continue;
-              const recoveryMarker = `<!-- nira-recovery-v1:${issue.number}:${latest.id} -->`;
-              if (comments.some(c => c.body && c.body.includes(recoveryMarker))) continue;
+              const acquired = comments
+                .filter(c => c.body?.includes('<!-- nira-lease-v1 -->') && c.body?.includes('NIRA_LEASE=ACQUIRED'))
+                .sort((a,b) => new Date(b.created_at) - new Date(a.created_at))[0];
+              if (!acquired) continue;
+
+              const leaseId = acquired.body.match(/LEASE_ID=([^\s]+)/i)?.[1] || '';
+              const clientRepository = acquired.body.match(/CLIENT_REPOSITORY=([^\s]+)/i)?.[1] || '';
+              const expectedMain = acquired.body.match(/EXPECTED_CLIENT_MAIN_SHA=([0-9a-f]{40})/i)?.[1] || '';
+              const ttlSeconds = Number(acquired.body.match(/LEASE_TTL_SECONDS=(\d+)/i)?.[1] || '300');
+              const ageSeconds = (now - new Date(acquired.created_at).getTime()) / 1000;
+              if (!leaseId || !clientRepository || !expectedMain || !clientRepository.includes('/')) {
+                core.warning('#' + issue.number + ': incomplete lease evidence; fail closed.');
+                continue;
+              }
+
+              const [clientOwner, clientRepo] = clientRepository.split('/');
+              const mainRef = await github.rest.git.getRef({
+                owner: clientOwner, repo: clientRepo, ref: 'heads/main'
+              });
+              const currentMain = mainRef.data.object.sha;
+              const pulls = await github.paginate(github.rest.pulls.list, {
+                owner: clientOwner, repo: clientRepo, state: 'open', base: 'main', per_page: 100
+              });
+              const workerPr = pulls.find(pr => (pr.body || '').includes('Lease: ' + leaseId));
+
+              if (workerPr) {
+                await github.rest.issues.removeLabel({
+                  owner, repo, issue_number: issue.number, name: 'factory:leased'
+                }).catch(() => {});
+                await github.rest.issues.removeLabel({
+                  owner, repo, issue_number: issue.number, name: 'factory:in-progress'
+                }).catch(() => {});
+                const marker = '<!-- nira-lease-to-pr-v1:' + leaseId + ' -->';
+                if (!comments.some(c => c.body?.includes(marker))) {
+                  await github.rest.issues.createComment({
+                    owner, repo, issue_number: issue.number,
+                    body: [
+                      marker,
+                      'NIRA_LEASE=HANDED_TO_PR',
+                      'LEASE_ID=' + leaseId,
+                      'CLIENT_PR=' + workerPr.number,
+                      'CLIENT_PR_HEAD=' + workerPr.head.sha,
+                      'OBSERVED_AT=' + new Date().toISOString()
+                    ].join('\n')
+                  });
+                }
+                wakeScheduler = true;
+                continue;
+              }
+
+              const drifted = currentMain !== expectedMain;
+              const expired = ageSeconds > ttlSeconds;
+              if (!drifted && !expired) continue;
+
+              const reason = drifted ? 'CLIENT_MAIN_DRIFT_NO_WORKER_PR' : 'LEASE_TTL_EXPIRED_NO_WORKER_PR';
+              const marker = '<!-- nira-recovery-v2:' + leaseId + ' -->';
+              if (comments.some(c => c.body?.includes(marker))) continue;
+
+              await github.rest.issues.removeLabel({
+                owner, repo, issue_number: issue.number, name: 'factory:leased'
+              }).catch(() => {});
+              await github.rest.issues.removeLabel({
+                owner, repo, issue_number: issue.number, name: 'factory:in-progress'
+              }).catch(() => {});
+              await github.rest.issues.addLabels({
+                owner, repo, issue_number: issue.number, labels: ['factory:queued']
+              });
               await github.rest.issues.createComment({
                 owner, repo, issue_number: issue.number,
-                body: `${recoveryMarker}\nNIRA_LEASE=EXPIRED\nLEASE_COMMENT=${latest.id}\nOBSERVED_AT=${new Date().toISOString()}`
+                body: [
+                  marker,
+                  'NIRA_LEASE=EXPIRED',
+                  'NIRA_RECOVERY=REQUEUE',
+                  'REASON=' + reason,
+                  'LEASE_ID=' + leaseId,
+                  'EXPECTED_CLIENT_MAIN_SHA=' + expectedMain,
+                  'OBSERVED_CLIENT_MAIN_SHA=' + currentMain,
+                  'AGE_SECONDS=' + Math.floor(ageSeconds),
+                  'OBSERVED_AT=' + new Date().toISOString()
+                ].join('\n')
               });
-              await github.rest.issues.removeLabel({owner, repo, issue_number: issue.number, name: 'factory:leased'}).catch(() => {});
-              await github.rest.issues.addLabels({owner, repo, issue_number: issue.number, labels: ['factory:queued']});
-              await github.rest.issues.createComment({
-                owner, repo, issue_number: issue.number,
-                body: `${recoveryMarker}\nNIRA_RECOVERY=STALE_LEASE\nACTION=REQUEUE\nLEASE_COMMENT=${latest.id}\nOBSERVED_AT=${new Date().toISOString()}`
+              wakeScheduler = true;
+            }
+
+            if (wakeScheduler) {
+              await github.rest.actions.createWorkflowDispatch({
+                owner, repo, workflow_id: 'nira-queue-scheduler.yml', ref: 'main'
               });
+              core.notice('NIRA_SCHEDULER_WAKE=RECOVERY_CAPACITY_CHANGED');
             }
