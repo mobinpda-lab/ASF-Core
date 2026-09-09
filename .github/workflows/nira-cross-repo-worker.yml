@@ -295,6 +295,37 @@ jobs:
             core.notice(`NIRA_BRANCH=${branch}`);
             core.notice(`NIRA_COMMIT=${pr.data.head.sha}`);
             core.notice(`NIRA_PR=${pr.data.number}`);
+
+      - name: Dispatch independent client-native validation
+        if: steps.execute.outcome == 'success' && steps.execute.outputs.pr_number != '' && inputs.repository != 'mobinpda-lab/NIRA'
+        uses: actions/github-script@v7
+        env:
+          CLIENT_REPOSITORY: ${{ inputs.repository }}
+          CLIENT_PR: ${{ steps.execute.outputs.pr_number }}
+          CLIENT_HEAD: ${{ steps.execute.outputs.commit_sha }}
+          CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'nira-client-validation.yml',
+              ref: 'main',
+              inputs: {
+                repository: process.env.CLIENT_REPOSITORY,
+                pr_number: process.env.CLIENT_PR,
+                expected_head_sha: process.env.CLIENT_HEAD,
+                control_issue_number: process.env.CONTROL_ISSUE_NUMBER,
+                stage: 'all'
+              }
+            });
+            core.notice(
+              'NIRA_CLIENT_VALIDATION_DISPATCH=REQUESTED repo=' +
+              process.env.CLIENT_REPOSITORY + ' pr=' + process.env.CLIENT_PR +
+              ' head=' + process.env.CLIENT_HEAD
+            );
+
       - name: Release and cool down AI lease on provider pressure
         if: steps.execute.outcome == 'failure' && steps.execute.outputs.provider_pressure == 'true'
         uses: actions/github-script@v7
