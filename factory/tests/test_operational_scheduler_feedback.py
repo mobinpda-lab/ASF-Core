@@ -135,3 +135,15 @@ def test_factory_pulse_is_read_only_and_reports_operational_state_not_fake_progr
     assert "oldest_queued_age_seconds" in pulse
     assert "authorized_candidates" in pulse
     assert "percentage" not in pulse.lower()
+
+
+def test_scheduler_supports_bounded_portfolio_parallelism_without_same_client_races():
+    scheduler = read(".github/workflows/nira-queue-scheduler.yml")
+    assert "NIRA_MAX_AI_LEASES" in scheduler
+    assert "NIRA_MAX_DETERMINISTIC_LEASES" in scheduler
+    assert "Math.min(8" in scheduler
+    assert "Math.min(16" in scheduler
+    assert "activeAiRepos" in scheduler
+    assert "AI lease already active for client" in scheduler
+    assert "activeAiRepos.add(item.clientRepository)" in scheduler
+    assert "CLIENT_REPOSITORY" in scheduler
