@@ -4,6 +4,11 @@ on:
   issues:
     types: [opened, labeled, unlabeled, reopened]
   workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Optional issue number for explicit non-recursive intake wake'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -23,13 +28,24 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const issue = context.payload.issue;
-            if (!issue) {
-              core.info('Manual invocation: no issue payload; no queue mutation performed.');
-              return;
-            }
             const owner = context.repo.owner;
             const repo = context.repo.repo;
+            let issue = context.payload.issue;
+            if (!issue && context.eventName === 'workflow_dispatch') {
+              const raw = String(context.payload.inputs?.issue_number || '');
+              if (!/^\d+$/.test(raw)) {
+                core.info('Manual invocation without issue_number; no queue mutation performed.');
+                return;
+              }
+              const fetched = await github.rest.issues.get({
+                owner, repo, issue_number: Number(raw)
+              });
+              issue = fetched.data;
+            }
+            if (!issue) {
+              core.info('No issue resolved; no queue mutation performed.');
+              return;
+            }
             const labels = issue.labels.map(x => x.name);
             if (!labels.includes('factory:ready')) {
               core.info('Issue is not factory:ready; no intake performed.');
