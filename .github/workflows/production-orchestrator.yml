@@ -47,10 +47,12 @@ jobs:
           private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
           owner: mobinpda-lab
           repositories: NIRA,Arvin-clean,YadNegar,NetworkCenterMonitor
+          permission-actions: read
 
       - name: Discover and promote registry-authorized candidates
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          READ_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -72,7 +74,7 @@ jobs:
           [[ "${#required_workflows[@]}" -gt 0 ]] || { echo "BLOCK invalid registry policy: no required workflows"; exit 1; }
           [[ "$required_label" != "null" && "$head_prefix" != "null" ]] || { echo "BLOCK invalid registry policy"; exit 1; }
 
-          prs=$(gh api --paginate "repos/$repo/pulls?state=open&base=main&per_page=100" | jq -s 'add')
+          prs=$(GH_TOKEN="$READ_TOKEN" gh api --paginate "repos/$repo/pulls?state=open&base=main&per_page=100" | jq -s 'add')
           candidates=$(jq -c --arg label "$required_label" --arg prefix "$head_prefix" '[.[] | select(.mergeable != false and (.labels | map(.name) | index($label))) | select(.head.ref | startswith($prefix))] | sort_by(.number)' <<<"$prs")
           count=$(jq 'length' <<<"$candidates")
           echo "DISCOVERY candidates=$count label=$required_label prefix=$head_prefix"
@@ -84,10 +86,10 @@ jobs:
             head=$(jq -r '.head.sha' <<<"$row")
             base_sha=$(jq -r '.base.sha' <<<"$row")
             draft=$(jq -r '.draft' <<<"$row")
-            current_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
+            current_main=$(GH_TOKEN="$READ_TOKEN" gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
             [[ "$base_sha" == "$current_main" ]] || { echo "BLOCK PR#$pr BASE_DRIFT base=$base_sha main=$current_main"; continue; }
 
-            runs=$(gh run list --repo "$repo" --commit "$head" --json databaseId,status,conclusion,workflowName,headSha --limit 100)
+            runs=$(GH_TOKEN="$READ_TOKEN" gh run list --repo "$repo" --commit "$head" --json databaseId,status,conclusion,workflowName,headSha --limit 100)
             all_green=true
             for wf in "${required_workflows[@]}"; do
               run_id=$(jq -r --arg sha "$head" --arg wf "$wf" '[.[] | select(.headSha == $sha and .status == "completed" and .conclusion == "success" and .workflowName == $wf)][0].databaseId // empty' <<<"$runs")
@@ -98,28 +100,34 @@ jobs:
               fi
               artifact=$(jq -r --arg wf "$wf" '.promotion.required_artifacts[$wf] // (if .promotion.required_workflow == $wf then .promotion.required_artifact else empty end) // empty' "$policy")
               if [[ -n "$artifact" ]]; then
-                artifact_json=$(gh api "repos/$repo/actions/runs/$run_id/artifacts")
-                artifact_count=$(jq --arg artifact "$artifact" '[.artifacts[] | select(.name == $artifact and .expired == false)] | length' <<<"$artifact_json")
+                artifact_url="repos/$repo/actions/runs/$run_id/artifacts"
+                echo "VERIFY_ARTIFACT pr=$pr workflow=$wf run=$run_id artifact=$artifact head=$head"
+                artifact_json=$(gh api --paginate "$artifact_url?per_page=100" | jq -s '{artifacts: (map(.artifacts // []) | add)}')
+                artifact_count=$(jq --arg artifact "$artifact" --arg run_id "$run_id" --arg sha "$head" '[.artifacts[] | select(.name == $artifact and .expired == false and ((.workflow_run.id | tostring) == $run_id) and .workflow_run.head_sha == $sha)] | length' <<<"$artifact_json")
                 if [[ "$artifact_count" -eq 0 ]]; then
-                  echo "BLOCK PR#$pr workflow=$wf run=$run_id missing artifact=$artifact"
+                  echo "BLOCK PR#$pr workflow=$wf run=$run_id missing exact artifact=$artifact"
                   all_green=false
+                else
+                  echo "ARTIFACT_OK pr=$pr workflow=$wf run=$run_id artifact=$artifact head=$head"
                 fi
               fi
             done
             [[ "$all_green" == "true" ]] || continue
 
-            pr_now=$(gh api "repos/$repo/pulls/$pr")
+            echo "VERIFY_PR_STATE pr=$pr"
+            pr_now=$(GH_TOKEN="$READ_TOKEN" gh api "repos/$repo/pulls/$pr")
             [[ "$(jq -r '.state' <<<"$pr_now")" == "open" ]] || { echo "BLOCK PR#$pr state changed"; continue; }
             [[ "$(jq -r '.merged' <<<"$pr_now")" == "false" ]] || { echo "BLOCK PR#$pr already merged"; continue; }
             [[ "$(jq -r '.head.sha' <<<"$pr_now")" == "$head" ]] || { echo "BLOCK PR#$pr HEAD_DRIFT during validation"; continue; }
 
-            pre_merge_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
+            echo "VERIFY_MAIN_STABILITY pr=$pr"
+            pre_merge_main=$(GH_TOKEN="$READ_TOKEN" gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
             [[ "$pre_merge_main" == "$current_main" ]] || { echo "BLOCK PR#$pr MAIN_MOVED_BEFORE_MERGE old=$current_main new=$pre_merge_main"; continue; }
 
             if [[ "$draft" == "true" ]]; then
               if [[ "$auto_ready" == "true" ]]; then
                 gh api --method POST "repos/$repo/pulls/$pr/ready_for_review" >/dev/null
-                pr_now=$(gh api "repos/$repo/pulls/$pr")
+                pr_now=$(GH_TOKEN="$READ_TOKEN" gh api "repos/$repo/pulls/$pr")
                 [[ "$(jq -r '.draft' <<<"$pr_now")" == "false" ]] || { echo "BLOCK PR#$pr ready conversion not confirmed"; continue; }
               else
                 continue
@@ -131,13 +139,13 @@ jobs:
             response=$(curl --fail-with-body -sS -X PUT -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $GH_TOKEN" -H "X-GitHub-Api-Version: 2022-11-28" -H "Content-Type: application/json" "https://api.github.com/repos/$repo/pulls/$pr/merge" -d "$payload")
             [[ "$(jq -r '.merged // false' <<<"$response")" == "true" ]] || { echo "BLOCK PR#$pr merge API did not confirm merged=true"; continue; }
 
-            merged_json=$(gh api "repos/$repo/pulls/$pr")
+            merged_json=$(GH_TOKEN="$READ_TOKEN" gh api "repos/$repo/pulls/$pr")
             [[ "$(jq -r '.merged' <<<"$merged_json")" == "true" ]] || { echo "BLOCK PR#$pr post-merge confirmation failed"; exit 1; }
             merge_commit=$(jq -r '.merge_commit_sha' <<<"$merged_json")
             [[ -n "$merge_commit" && "$merge_commit" != "null" ]] || { echo "BLOCK PR#$pr missing merge_commit_sha"; exit 1; }
-            new_main=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
+            new_main=$(GH_TOKEN="$READ_TOKEN" gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')
             [[ "$new_main" == "$merge_commit" ]] || { echo "BLOCK PR#$pr main postcondition mismatch main=$new_main merge_commit=$merge_commit"; exit 1; }
             [[ "$new_main" != "$current_main" ]] || { echo "BLOCK PR#$pr main unchanged"; exit 1; }
 
             gh workflow run production-orchestrator.yml --repo "$repo" --ref main
-          done < <(jq -c '.[]' <<<"$candidates")
+done < <(jq -c '.[]' <<<"$candidates")
