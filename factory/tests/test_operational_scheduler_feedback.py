@@ -229,3 +229,20 @@ def test_orchestrator_treats_candidate_limit_as_processing_budget_not_global_fai
     assert "deferred=" in wf
     assert ".[0:$max]" in wf
     assert "break" in wf
+
+
+def test_intake_reactivates_previously_intaken_ready_work_only_when_idle():
+    intake = read(".github/workflows/nira-intake-queue.yml")
+    assert "nira-intake-reactivation-v1" in intake
+    assert "NIRA_INTAKE=REACTIVATED" in intake
+    assert "READY_WITHOUT_ACTIVE_OR_TERMINAL_STATE" in intake
+    for state in (
+        "factory:queued",
+        "factory:leased",
+        "factory:in-progress",
+        "factory:completed",
+        "factory:blocked",
+        "factory:escalated",
+    ):
+        assert state in intake
+    assert "NIRA_SCHEDULER_WAKE=REACTIVATED" in intake

@@ -46,7 +46,11 @@ jobs:
               core.info('No issue resolved; no queue mutation performed.');
               return;
             }
-            const labels = issue.labels.map(x => x.name);
+            const fresh = await github.rest.issues.get({
+              owner, repo, issue_number: issue.number
+            });
+            issue = fresh.data;
+            const labels = issue.labels.map(x => typeof x === 'string' ? x : x.name);
             if (!labels.includes('factory:ready')) {
               core.info('Issue is not factory:ready; no intake performed.');
               return;
@@ -55,8 +59,41 @@ jobs:
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner, repo, issue_number: issue.number, per_page: 100
             });
-            if (comments.some(c => c.body && c.body.includes(marker))) {
-              core.info(`Already intaken: #${issue.number}`);
+            const alreadyIntaken = comments.some(c => c.body && c.body.includes(marker));
+            if (alreadyIntaken) {
+              const activeOrTerminal = [
+                'factory:queued',
+                'factory:leased',
+                'factory:in-progress',
+                'factory:completed',
+                'factory:blocked',
+                'factory:escalated'
+              ].some(label => labels.includes(label));
+              if (activeOrTerminal) {
+                core.info(`Already intaken with active/terminal state: #${issue.number}`);
+                return;
+              }
+              await github.rest.issues.addLabels({
+                owner, repo, issue_number: issue.number,
+                labels: ['factory:queued']
+              });
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: issue.number,
+                body: [
+                  '<!-- nira-intake-reactivation-v1 -->',
+                  'NIRA_INTAKE=REACTIVATED',
+                  'NIRA_QUEUE=GITHUB_ISSUE',
+                  'ISSUE=' + issue.number,
+                  'REASON=READY_WITHOUT_ACTIVE_OR_TERMINAL_STATE',
+                  'SHA=' + context.sha
+                ].join('\n')
+              });
+              await github.rest.actions.createWorkflowDispatch({
+                owner, repo,
+                workflow_id: 'nira-queue-scheduler.yml',
+                ref: 'main'
+              });
+              core.notice('NIRA_SCHEDULER_WAKE=REACTIVATED issue=' + issue.number);
               return;
             }
             await github.rest.issues.addLabels({
