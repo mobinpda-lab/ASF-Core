@@ -21,7 +21,7 @@ def _task(*, attempt: int = 0, base_sha: str = "a" * 40) -> Task:
     return Task(
         task_id="recovery-idempotency-001",
         project_id="arvin-clean",
-        issue_ref="github:ASF-Core#47",
+        issue_ref="nira:task-47",
         objective="exercise recovery and idempotent replay",
         acceptance_criteria=("expired lease rejected", "bounded recovery", "idempotent replay"),
         base_main_sha=base_sha,

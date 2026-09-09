@@ -1,7 +1,7 @@
 """Generic project adapter boundary.
 
-Adapters translate project-specific execution surfaces into factory contracts.
-No product implementation belongs in ASF-Core.
+Adapters translate project-specific execution surfaces into NIRA factory contracts.
+No product implementation belongs in the factory control plane.
 """
 from __future__ import annotations
 

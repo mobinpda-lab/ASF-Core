@@ -2,7 +2,7 @@
 
 **Status:** Canonical implementation contract  
 **Scope:** NIRA only  
-**Repository:** `mobinpda-lab/ASF-Core` (current GitHub repository slug; official factory name is NIRA)
+**Repository:** `mobinpda-lab/NIRA`
 
 ## Objective
 

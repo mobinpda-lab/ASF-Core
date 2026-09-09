@@ -36,11 +36,10 @@ jobs:
         uses: actions/create-github-app-token@v2
         id: app-token
         with:
-          # Normalize the App ID to a JSON number so the JWT `iss` claim is numeric.
           app-id: ${{ fromJSON(secrets.NIRA_GITHUB_APP_ID) }}
           private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: ASF-Core,Arvin-clean,YadNegar,NetworkCenterMonitor
+          repositories: Arvin-clean,YadNegar,NetworkCenterMonitor
 
       - name: Verify target repository and HEAD
         uses: actions/github-script@v7
@@ -52,7 +51,6 @@ jobs:
           script: |
             const target = process.env.CLIENT_REPOSITORY;
             const allowed = new Set([
-              'mobinpda-lab/ASF-Core',
               'mobinpda-lab/Arvin-clean',
               'mobinpda-lab/YadNegar',
               'mobinpda-lab/NetworkCenterMonitor'

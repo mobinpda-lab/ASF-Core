@@ -20,10 +20,10 @@ def test_registered_client_full_lifecycle(tmp_path):
     result_sha = "b" * 40
 
     project = ProjectContract(
-        project_id="e2e-nira-client",
-        repository="mobinpda-lab/ASF-Core",
+        project_id="arvin-clean",
+        repository="mobinpda-lab/Arvin-clean",
         owner="mobinpda-lab",
-        adapter="generic",
+        adapter="arvin",
         enabled=True,
         default_branch="main",
         completion_definition=("promoted", "recovered", "evidence_verified"),

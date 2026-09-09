@@ -1,7 +1,7 @@
 # Vazirharf v34.003 — Font Standard
 
 ## Canonical standard
-Vazirharf v34.003 is the canonical Persian/Arabic font standard for NIRA / ASF-Core where project typography is required.
+Vazirharf v34.003 is the canonical Persian/Arabic font standard for NIRA where project typography is required.
 
 - Upstream: `nadalaba/vazirharf`
 - Version: `v34.003`

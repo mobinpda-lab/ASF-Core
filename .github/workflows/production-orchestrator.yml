@@ -40,7 +40,7 @@ jobs:
           app-id: ${{ secrets.NIRA_GITHUB_APP_ID }}
           private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
           owner: mobinpda-lab
-          repositories: ASF-Core,Arvin-clean,YadNegar,NetworkCenterMonitor
+          repositories: Arvin-clean,YadNegar,NetworkCenterMonitor
 
       - name: Discover and promote registry-authorized candidates
         env:

@@ -69,7 +69,6 @@ jobs:
             const clientRepository = clientRepoMatch[1];
             const clientIssue = Number(clientIssueMatch[1]);
             const allowed = new Set([
-              'mobinpda-lab/ASF-Core',
               'mobinpda-lab/Arvin-clean',
               'mobinpda-lab/YadNegar',
               'mobinpda-lab/NetworkCenterMonitor'

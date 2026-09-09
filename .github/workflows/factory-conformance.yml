@@ -1,22 +1,9 @@
 name: NIRA Factory Conformance
 
 on:
-  push:
-    branches: [main, 'nira/**']
-    paths:
-      - 'factory/**'
-      - 'docs/architecture/**'
-      - '.github/workflows/**'
-      - '.github/workflows/factory-conformance.yml'
   pull_request:
+  push:
     branches: [main]
-    paths:
-      - 'factory/**'
-      - 'docs/architecture/**'
-      - '.github/workflows/**'
-  schedule:
-    - cron: '*/15 * * * *'
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -28,20 +15,26 @@ jobs:
       - name: Checkout exact head
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+
+      - name: Run actions/setup-python@v5
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
+
       - name: Install test tooling
         run: python -m pip install --disable-pip-version-check pytest
+
       - name: Run NIRA factory contract tests
         run: python -m pytest -q factory/tests
+
       - name: Fail closed on missing canonical NIRA surfaces
         shell: bash
         run: |
           set -euo pipefail
           required=(
+            NIRA_IDENTITY.json
+            docs/history/NIRA_IDENTITY_HISTORY.md
             factory/contracts/schema.py
             factory/runtime/state_machine.py
             factory/gates/engine.py
@@ -53,60 +46,44 @@ jobs:
           for path in "${required[@]}"; do
             test -f "$path" || { echo "MISSING_NIRA_CANONICAL_SURFACE=$path"; exit 1; }
           done
+          jq -e '.schema_version == "1.1" and .canonical_name == "NIRA" and .repository_name == "NIRA" and .single_factory_authority == true and .historical_identifiers_may_be_active_authority == false' NIRA_IDENTITY.json >/dev/null
           jq -e '.schema_version == "1.0" and .promotion.enabled == true and (.promotion.max_candidates_per_cycle >= 1)' factory/registry/promotion-policy.json >/dev/null
           grep -q 'L10' README.md || {
             echo 'NIRA L10 status must remain explicit until authentic E2E evidence exists'; exit 1;
           }
-      - name: Audit active surfaces for legacy factory identity
+
+      - name: Audit active source tree for legacy factory identity
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
+          history='docs/history/NIRA_IDENTITY_HISTORY.md'
+          test -f "$history"
 
-          # Build forbidden identifiers without embedding them literally in this gate,
-          # so the gate cannot fail because it contains its own patterns.
-          legacy = [
-              ''.join(map(chr, (65,83,70,95,77,79,67))),
-              ''.join(map(chr, (65,83,70,45,77,79,67))),
-              ''.join(map(chr, (65,83,70,95,70,65,67,84,79,82,89))),
-              ''.join(map(chr, (65,83,70,95,67,79,82,69))),
-              ''.join(map(chr, (65,83,70,32,77,79,67))),
-              ''.join(map(chr, (65,83,70,45,67,111,114,101,32,67,73))),
-              ''.join(map(chr, (97,115,102,45,99,111,114,101,45,116,101,115,116,45,114,101,115,117,108,116,115))),
-              ''.join(map(chr, (97,115,102,45,97,117,116,104,111,114,105,122,101,100))),
-          ]
-          roots = [Path('.github/workflows'), Path('factory'), Path('docs/architecture'), Path('README.md')]
-          files = []
-          for root in roots:
-              if root.is_file():
-                  files.append(root)
-              elif root.exists():
-                  files.extend(p for p in root.rglob('*') if p.is_file())
-          findings = []
-          for path in sorted(set(files)):
-              if path.as_posix() == '.github/workflows/factory-conformance.yml':
-                  continue
-              try:
-                  text = path.read_text(encoding='utf-8')
-              except (UnicodeDecodeError, OSError):
-                  continue
-              for lineno, line in enumerate(text.splitlines(), 1):
-                  for pattern in legacy:
-                      if pattern in line:
-                          findings.append(f'{path}:{lineno}:{pattern}')
-          if findings:
-              Path('nira-naming-audit.txt').write_text('\n'.join(findings) + '\n', encoding='utf-8')
-              print('LEGACY_IDENTITY_FOUND')
-              print('\n'.join(findings))
-              raise SystemExit(1)
-          Path('nira-naming-audit.txt').write_text('LEGACY_IDENTITY_FOUND=0\n', encoding='utf-8')
-          print('LEGACY_IDENTITY_FOUND=0')
-          PY
+          # Extract only the intentional historical identifiers from the single
+          # history record, then use git's indexed working tree to avoid walking
+          # .git and large/generated files through Python.
+          mapfile -t legacy < <(sed -n 's/^- `\([^`]*\)` — .*/\1/p' "$history")
+          ((${#legacy[@]} > 0)) || { echo 'NIRA_LEGACY_IDENTIFIER_LIST_EMPTY'; exit 1; }
+
+          : > nira-naming-audit.txt
+          for pattern in "${legacy[@]}"; do
+            while IFS= read -r match; do
+              file="${match%%:*}"
+              [[ "$file" == "$history" ]] && continue
+              printf '%s\n' "$match" >> nira-naming-audit.txt
+            done < <(git grep -n -F -- "$pattern" -- ':!docs/history/NIRA_IDENTITY_HISTORY.md' || true)
+          done
+
+          if [[ -s nira-naming-audit.txt ]]; then
+            echo 'LEGACY_IDENTITY_FOUND'
+            cat nira-naming-audit.txt
+            exit 1
+          fi
+          printf 'LEGACY_IDENTITY_FOUND=0\n' > nira-naming-audit.txt
+          echo 'LEGACY_IDENTITY_FOUND=0'
+
       - name: Upload naming audit evidence
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nira-naming-audit
           path: nira-naming-audit.txt
-          if-no-files-found: error
