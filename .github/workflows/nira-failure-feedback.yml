@@ -63,6 +63,45 @@ jobs:
               /secret|credential|token/i.test(f.filename)
             );
 
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              owner, repo, run_id: run.id, per_page: 100
+            });
+            const failedSteps = [];
+            for (const job of jobs) {
+              for (const step of (job.steps || [])) {
+                if (step.conclusion === 'failure' || step.conclusion === 'timed_out') {
+                  failedSteps.push(job.name + ' :: ' + step.name);
+                }
+              }
+            }
+            const signal = (run.name + ' ' + failedSteps.join(' ')).toLowerCase();
+            let failureClass = 'UNKNOWN';
+            let ownerLane = 'ESCALATE';
+            let retryable = false;
+            let classAutoRepair = false;
+            if (/permission|credential|token|github app|private key|forbidden|security/.test(signal)) {
+              failureClass = 'PERMISSION';
+              ownerLane = 'CREDENTIAL_OR_SECURITY';
+            } else if (/setup|install|runner|sdk|network|service|environment/.test(signal)) {
+              failureClass = 'ENVIRONMENT';
+              ownerLane = 'ENVIRONMENT_RECOVERY';
+              retryable = true;
+            } else if (/test|pytest|assert|regression|golden|snapshot/.test(signal)) {
+              failureClass = 'TEST_REGRESSION';
+              ownerLane = 'BOUNDED_REPAIR';
+              retryable = true;
+              classAutoRepair = true;
+            } else if (/compile|build|syntax|type|lint|analy|contract/.test(signal)) {
+              failureClass = 'CODE';
+              ownerLane = 'BOUNDED_REPAIR';
+              retryable = true;
+              classAutoRepair = true;
+            } else if (conclusion === 'timed_out') {
+              failureClass = 'FLAKY';
+              ownerLane = 'REVALIDATE';
+              retryable = true;
+            }
+
             let previousAttempt = 0;
             const sourceIssueMatch = String(pr.body || '').match(/Issue:\s*#(\d+)/i);
             if (sourceIssueMatch) {
@@ -78,7 +117,7 @@ jobs:
               }
             }
             const nextAttempt = previousAttempt + 1;
-            const autoFixAllowed = !unsafe && nextAttempt <= 2;
+            const autoFixAllowed = classAutoRepair && !unsafe && nextAttempt <= 2;
 
             const title = '[AUTO-FIX] ' + run.name + ' failed at ' + headSha.slice(0, 12);
             const existing = await github.paginate(github.rest.issues.listForRepo, {
@@ -101,6 +140,11 @@ jobs:
                 'SOURCE_RUN_URL: ' + String(run.html_url || ''),
                 'SOURCE_HEAD_SHA: ' + headSha,
                 'SOURCE_CONCLUSION: ' + conclusion,
+                'NIRA_FEEDBACK_CLASS: ' + failureClass,
+                'NIRA_FEEDBACK_CONFIDENCE: ' + (failureClass === 'UNKNOWN' ? 'NONE' : 'MEDIUM'),
+                'NIRA_FEEDBACK_OWNER_LANE: ' + ownerLane,
+                'NIRA_FEEDBACK_RETRYABLE: ' + String(retryable),
+                'FAILED_STEPS: ' + failedSteps.join(' | '),
                 'NIRA_AUTO_FIX_ATTEMPT: ' + nextAttempt,
                 'AUTO_FIX_ELIGIBLE: ' + String(autoFixAllowed),
                 '',
@@ -121,8 +165,10 @@ jobs:
               await github.rest.issues.createComment({
                 owner, repo, issue_number: issueNumber,
                 body: unsafe
-                  ? 'NIRA_FEEDBACK=ESCALATE_UNSAFE_SCOPE'
-                  : 'NIRA_FEEDBACK=ESCALATE_AUTO_FIX_BUDGET_EXHAUSTED'
+                  ? 'NIRA_FEEDBACK=ESCALATE_UNSAFE_SCOPE\nNIRA_FEEDBACK_CLASS=' + failureClass
+                  : (!classAutoRepair
+                      ? 'NIRA_FEEDBACK=ROUTE_' + ownerLane + '\nNIRA_FEEDBACK_CLASS=' + failureClass
+                      : 'NIRA_FEEDBACK=ESCALATE_AUTO_FIX_BUDGET_EXHAUSTED\nNIRA_FEEDBACK_CLASS=' + failureClass)
               });
               core.notice('NIRA_FEEDBACK=ESCALATED issue=' + issueNumber);
               return;
