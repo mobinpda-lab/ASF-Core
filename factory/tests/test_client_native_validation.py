@@ -53,3 +53,26 @@ def test_registry_no_longer_claims_nira_ci_for_product_clients():
     assert '"Arvin Parallel Wave"' in policy
     assert '"YadNegar CI"' in policy
     assert '"Android CI"' in policy
+
+
+def test_client_promotion_is_separate_exact_head_authority():
+    promotion = read(".github/workflows/nira-client-promotion.yml")
+    assert "NIRA_CLIENT_PROMOTION=UNREGISTERED_CLIENT" in promotion
+    assert "HEAD_NAMESPACE_REJECTED" in promotion
+    assert "LEASE_PROVENANCE_NOT_OBSERVED" in promotion
+    assert "BASE_DRIFT" in promotion
+    assert "GATE_NOT_VERIFIED" in promotion
+    assert "MAIN_MOVED_DURING_VALIDATION" in promotion
+    assert "sha: expectedHead" in promotion
+    assert "POSTCONDITION_MAIN_MISMATCH" in promotion
+    assert "factory:completed" in promotion
+    assert "createOrUpdateFileContents" not in promotion
+
+
+def test_validation_hands_only_verified_head_to_promotion():
+    validation = read(".github/workflows/nira-client-validation.yml")
+    assert "Hand verified client head to separate promotion authority" in validation
+    assert "if: success()" in validation
+    assert "nira-client-promotion.yml" in validation
+    assert "expected_head_sha" in validation
+    assert "control_issue_number" in validation
