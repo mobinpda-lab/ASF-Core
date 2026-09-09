@@ -1,0 +1,193 @@
+name: NIRA Client-Native Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: 'Registered client repository owner/name'
+        required: true
+        type: string
+      pr_number:
+        description: 'Client pull request number'
+        required: true
+        type: string
+      expected_head_sha:
+        description: 'Exact client PR head created/observed by NIRA'
+        required: true
+        type: string
+      control_issue_number:
+        description: 'NIRA control issue owning this validation'
+        required: true
+        type: string
+      stage:
+        description: 'fast, heavy, or all'
+        required: false
+        default: all
+        type: choice
+        options: [fast, heavy, all]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: nira-client-validation-${{ inputs.repository }}-${{ inputs.pr_number }}-${{ inputs.expected_head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout canonical NIRA policy
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Mint client validation token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.NIRA_GITHUB_APP_ID }}
+          private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
+          owner: mobinpda-lab
+          repositories: Arvin-clean,YadNegar,NetworkCenterMonitor
+          permission-actions: write
+          permission-contents: read
+          permission-pull-requests: read
+
+      - name: Dispatch and independently observe client-native gates
+        uses: actions/github-script@v7
+        env:
+          CLIENT_REPOSITORY: ${{ inputs.repository }}
+          CLIENT_PR: ${{ inputs.pr_number }}
+          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+          CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}
+          VALIDATION_STAGE: ${{ inputs.stage }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const policy = JSON.parse(fs.readFileSync('factory/registry/client-validation-policy.json', 'utf8'));
+            const repository = process.env.CLIENT_REPOSITORY;
+            const prNumber = Number(process.env.CLIENT_PR);
+            const expectedHead = process.env.EXPECTED_HEAD_SHA;
+            const controlIssue = Number(process.env.CONTROL_ISSUE_NUMBER);
+            const stage = process.env.VALIDATION_STAGE || 'all';
+            if (!/^[0-9a-f]{40}$/.test(expectedHead)) throw new Error('NIRA_CLIENT_VALIDATION=INVALID_EXPECTED_HEAD');
+            if (!Number.isInteger(prNumber) || prNumber <= 0 || !Number.isInteger(controlIssue) || controlIssue <= 0) {
+              throw new Error('NIRA_CLIENT_VALIDATION=INVALID_PR_OR_CONTROL_ISSUE');
+            }
+            const config = policy.clients?.[repository];
+            if (!config) throw new Error('NIRA_CLIENT_VALIDATION=UNREGISTERED_CLIENT');
+            const [owner, repo] = repository.split('/');
+            if (!owner || !repo) throw new Error('NIRA_CLIENT_VALIDATION=INVALID_REPOSITORY');
+
+            const pr = await github.rest.pulls.get({owner, repo, pull_number: prNumber});
+            if (pr.data.state !== 'open') throw new Error('NIRA_CLIENT_VALIDATION=PR_NOT_OPEN');
+            if (pr.data.base.ref !== 'main') throw new Error('NIRA_CLIENT_VALIDATION=BASE_NOT_MAIN');
+            if (pr.data.head.sha !== expectedHead) throw new Error('NIRA_CLIENT_VALIDATION=HEAD_DRIFT');
+            if (pr.data.head.repo?.full_name !== repository) throw new Error('NIRA_CLIENT_VALIDATION=FORK_HEAD_REJECTED');
+
+            const selected = [];
+            if (stage === 'fast' || stage === 'all') selected.push(...(config.fast || []).map(x => ({...x, stage: 'fast'})));
+            if (stage === 'heavy' || stage === 'all') selected.push(...(config.heavy || []).map(x => ({...x, stage: 'heavy'})));
+            if (!selected.length) throw new Error('NIRA_CLIENT_VALIDATION=NO_GATES_CONFIGURED');
+
+            async function runsForHead() {
+              return github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+                owner, repo, head_sha: expectedHead, per_page: 100
+              });
+            }
+            function latestNamed(runs, name) {
+              return runs
+                .filter(r => r.name === name && r.head_sha === expectedHead)
+                .sort((a,b) => b.id - a.id)[0] || null;
+            }
+
+            let runs = await runsForHead();
+            const dispatches = [];
+            for (const gate of selected) {
+              const existing = latestNamed(runs, gate.name);
+              if (existing?.status === 'completed' && existing.conclusion === 'success') {
+                dispatches.push({name: gate.name, workflow: gate.workflow, stage: gate.stage, action: 'REUSE_SUCCESS', run_id: existing.id});
+                continue;
+              }
+              if (!gate.dispatchable) {
+                dispatches.push({name: gate.name, workflow: gate.workflow, stage: gate.stage, action: 'OBSERVE_AUTO_TRIGGER'});
+                continue;
+              }
+              try {
+                await github.rest.actions.createWorkflowDispatch({
+                  owner, repo, workflow_id: gate.workflow, ref: pr.data.head.ref
+                });
+                dispatches.push({name: gate.name, workflow: gate.workflow, stage: gate.stage, action: 'DISPATCHED'});
+              } catch (error) {
+                if (error.status !== 422) throw error;
+                runs = await runsForHead();
+                const reusable = latestNamed(runs, gate.name);
+                if (!reusable) throw new Error('NIRA_CLIENT_VALIDATION=DISPATCH_422_WITHOUT_EXACT_HEAD_RUN:' + gate.name);
+                dispatches.push({name: gate.name, workflow: gate.workflow, stage: gate.stage, action: 'REUSE_AFTER_422', run_id: reusable.id});
+              }
+            }
+
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+            let observed = [];
+            for (let attempt = 1; attempt <= 180; attempt++) {
+              runs = await runsForHead();
+              observed = selected.map(gate => {
+                const run = latestNamed(runs, gate.name);
+                return {
+                  name: gate.name,
+                  workflow: gate.workflow,
+                  stage: gate.stage,
+                  run_id: run?.id || null,
+                  status: run?.status || 'missing',
+                  conclusion: run?.conclusion || null,
+                  event: run?.event || null,
+                  head_sha: run?.head_sha || null,
+                  html_url: run?.html_url || null
+                };
+              });
+              const settled = observed.every(x => x.status === 'completed');
+              if (settled) break;
+              if (attempt === 1 || attempt % 12 === 0) {
+                core.info('NIRA client validation waiting attempt=' + attempt + ' state=' + JSON.stringify(observed));
+              }
+              await sleep(10000);
+            }
+
+            const failures = observed.filter(x =>
+              x.status !== 'completed' || x.conclusion !== 'success' || x.head_sha !== expectedHead
+            );
+            const evidence = {
+              schema_version: '1.0',
+              authority: 'NIRA',
+              validation_mode: 'client-native-workflow-observation',
+              project_id: config.project_id,
+              repository,
+              control_issue_number: controlIssue,
+              pr_number: prNumber,
+              exact_head_sha: expectedHead,
+              exact_base_sha: pr.data.base.sha,
+              stage,
+              dispatches,
+              gates: observed,
+              result: failures.length ? 'BLOCKED' : 'VERIFIED',
+              collector_identity: 'nira-client-native-validation',
+              observed_at: new Date().toISOString()
+            };
+            fs.writeFileSync('nira-client-validation-evidence.json', JSON.stringify(evidence, null, 2) + '\n');
+            core.notice('NIRA_CLIENT_VALIDATION=' + evidence.result + ' repo=' + repository + ' pr=' + prNumber + ' head=' + expectedHead);
+            if (failures.length) {
+              core.setFailed('NIRA_CLIENT_VALIDATION_BLOCKED=' + failures.map(x => x.name + ':' + x.status + ':' + x.conclusion).join(','));
+            }
+
+      - name: Upload independent client validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nira-client-validation-${{ inputs.pr_number }}-${{ inputs.expected_head_sha }}
+          path: nira-client-validation-evidence.json
+          if-no-files-found: error
