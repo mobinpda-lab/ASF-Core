@@ -85,6 +85,17 @@ jobs:
               const comments = await github.paginate(github.rest.issues.listComments, {
                 owner, repo, issue_number: item.issue.number, per_page: 100
               });
+              if (item.lane === 'AI') {
+                const pressure = comments
+                  .filter(c => c.body?.includes('<!-- nira-provider-pressure-v1 -->'))
+                  .sort((a,b) => new Date(b.created_at) - new Date(a.created_at))[0];
+                const untilText = pressure?.body?.match(/NIRA_PROVIDER_COOLDOWN_UNTIL=([^\s]+)/i)?.[1] || '';
+                const untilMs = Date.parse(untilText);
+                if (Number.isFinite(untilMs) && Date.now() < untilMs) {
+                  core.info('#' + item.issue.number + ': provider cooldown active until ' + untilText);
+                  continue;
+                }
+              }
               const pending = comments
                 .filter(c => c.body?.includes('<!-- nira-scheduler-dispatch-v1:'))
                 .filter(c => c.body?.includes('NIRA_SCHEDULER_DISPATCH=PENDING'))

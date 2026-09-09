@@ -141,6 +141,7 @@ jobs:
                 ref: 'main',
                 inputs: {
                   repository: clientRepository,
+                  control_issue_number: String(issue.number),
                   issue_number: String(clientIssue),
                   expected_main_sha: expectedMainSha,
                   worker_id: workerId,

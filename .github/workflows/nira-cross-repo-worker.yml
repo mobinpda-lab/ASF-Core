@@ -7,6 +7,10 @@ on:
         description: 'Registered workload repository or NIRA self-dogfood target (owner/name)'
         required: true
         type: string
+      control_issue_number:
+        description: 'NIRA control-plane issue number owning this lease'
+        required: true
+        type: string
       issue_number:
         description: 'Client issue number'
         required: true
@@ -29,6 +33,8 @@ on:
         type: string
 permissions:
   contents: read
+  issues: write
+  actions: write
 concurrency:
   group: nira-worker-${{ inputs.repository }}-${{ inputs.issue_number }}
   cancel-in-progress: false
@@ -43,6 +49,7 @@ jobs:
         shell: bash
         env:
           CLIENT_REPOSITORY: ${{ inputs.repository }}
+          CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
           WORKER_ID: ${{ inputs.worker_id }}
           LEASE_ID: ${{ inputs.lease_id }}
@@ -52,6 +59,7 @@ jobs:
           set -euo pipefail
           test -n "$WORKER_ID"
           test -n "$LEASE_ID"
+          test "$CONTROL_ISSUE_NUMBER" -gt 0
           test "$ISSUE_NUMBER" -gt 0
           test "$FENCE_TOKEN" -gt 0
           case "$CLIENT_REPOSITORY" in
@@ -70,9 +78,11 @@ jobs:
           repositories: NIRA,Arvin-clean,YadNegar,NetworkCenterMonitor
       - name: Run bounded real code worker
         id: execute
+        continue-on-error: true
         uses: actions/github-script@v7
         env:
           CLIENT_REPOSITORY: ${{ inputs.repository }}
+          CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}
           EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
           WORKER_ID: ${{ inputs.worker_id }}
@@ -107,7 +117,17 @@ jobs:
                 headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ model: process.env.OPENAI_MODEL, input, max_output_tokens: 12000 })
               });
-              if (!response.ok) throw new Error(`OPENAI_HTTP_${response.status}: ${await response.text()}`);
+              if (!response.ok) {
+                const detail = await response.text();
+                if ([429, 502, 503, 504].includes(response.status)) {
+                  core.setOutput('provider_pressure', 'true');
+                  core.setOutput('provider_status', String(response.status));
+                  core.setOutput('provider_retry_after', response.headers.get('retry-after') || '');
+                  throw new Error(`NIRA_PROVIDER_PRESSURE_HTTP_${response.status}: ${detail}`);
+                }
+                throw new Error(`OPENAI_HTTP_${response.status}: ${detail}`);
+              }
+              core.setOutput('provider_pressure', 'false');
               return response.json();
             }
             function outputText(result) {
@@ -209,6 +229,62 @@ jobs:
             core.notice(`NIRA_BRANCH=${branch}`);
             core.notice(`NIRA_COMMIT=${pr.data.head.sha}`);
             core.notice(`NIRA_PR=${pr.data.number}`);
+      - name: Release and cool down AI lease on provider pressure
+        if: steps.execute.outcome == 'failure' && steps.execute.outputs.provider_pressure == 'true'
+        uses: actions/github-script@v7
+        env:
+          CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}
+          PROVIDER_STATUS: ${{ steps.execute.outputs.provider_status }}
+          PROVIDER_RETRY_AFTER: ${{ steps.execute.outputs.provider_retry_after }}
+          LEASE_ID: ${{ inputs.lease_id }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = Number(process.env.CONTROL_ISSUE_NUMBER);
+            const status = Number(process.env.PROVIDER_STATUS || 0);
+            const retryHeader = Number(process.env.PROVIDER_RETRY_AFTER || 0);
+            const defaultSeconds = status === 429 ? 60 : 30;
+            const cooldownSeconds = Math.max(15, Math.min(
+              Number.isFinite(retryHeader) && retryHeader > 0 ? retryHeader : defaultSeconds,
+              300
+            ));
+            const until = new Date(Date.now() + cooldownSeconds * 1000).toISOString();
+            await github.rest.issues.removeLabel({
+              owner, repo, issue_number: issueNumber, name: 'factory:leased'
+            }).catch(() => {});
+            await github.rest.issues.removeLabel({
+              owner, repo, issue_number: issueNumber, name: 'factory:in-progress'
+            }).catch(() => {});
+            await github.rest.issues.addLabels({
+              owner, repo, issue_number: issueNumber, labels: ['factory:queued']
+            });
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: issueNumber,
+              body: [
+                '<!-- nira-provider-pressure-v1 -->',
+                'NIRA_PROVIDER_PRESSURE=TRANSIENT',
+                'HTTP_STATUS=' + status,
+                'LEASE_ID=' + process.env.LEASE_ID,
+                'NIRA_PROVIDER_COOLDOWN_SECONDS=' + cooldownSeconds,
+                'NIRA_PROVIDER_COOLDOWN_UNTIL=' + until,
+                'ACTION=RELEASE_LEASE_AND_REQUEUE',
+                'PRODUCT_FAILURE_CLAIMED=false'
+              ].join('\n')
+            });
+            await github.rest.actions.createWorkflowDispatch({
+              owner, repo, workflow_id: 'nira-queue-scheduler.yml', ref: 'main'
+            });
+            core.notice('NIRA_PROVIDER_PRESSURE=LEASE_RELEASED cooldown_until=' + until);
+
+      - name: Fail closed on non-provider worker failure
+        if: steps.execute.outcome == 'failure' && steps.execute.outputs.provider_pressure != 'true'
+        shell: bash
+        run: |
+          echo 'NIRA_WORKER=FAILED_NON_PROVIDER' >&2
+          exit 1
+
       - name: Record execution-boundary evidence
         if: always()
         shell: bash
@@ -219,7 +295,10 @@ jobs:
             echo 'NIRA_WORKER_RUNTIME=REAL_GITHUB_ACTIONS'
             echo 'NIRA_CREDENTIAL_MODEL=GITHUB_APP_INSTALLATION_TOKEN'
             echo "NIRA_CLIENT_REPOSITORY=${{ inputs.repository }}"
+            echo "NIRA_CONTROL_ISSUE=${{ inputs.control_issue_number }}"
             echo "NIRA_ISSUE=${{ inputs.issue_number }}"
+            echo "NIRA_PROVIDER_PRESSURE=${{ steps.execute.outputs.provider_pressure }}"
+            echo "NIRA_PROVIDER_STATUS=${{ steps.execute.outputs.provider_status }}"
             echo "NIRA_EXPECTED_MAIN_SHA=${{ inputs.expected_main_sha }}"
             echo "NIRA_WORKER_ID=${{ inputs.worker_id }}"
             echo "NIRA_LEASE_ID=${{ inputs.lease_id }}"
