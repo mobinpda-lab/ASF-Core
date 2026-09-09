@@ -76,3 +76,13 @@ def test_validation_hands_only_verified_head_to_promotion():
     assert "nira-client-promotion.yml" in validation
     assert "expected_head_sha" in validation
     assert "control_issue_number" in validation
+
+
+def test_client_promotion_persists_truth_independent_of_optional_issue_metadata():
+    promotion = read(".github/workflows/nira-client-promotion.yml")
+    assert "nira-client-promotion-evidence.json" in promotion
+    assert "observation_state: 'VERIFIED'" in promotion
+    assert "confidence: 'HIGH'" in promotion
+    assert "Completion comment failed after verified merge" in promotion
+    assert "Optional completion label unavailable" in promotion
+    assert "Upload cross-repository promotion evidence" in promotion
