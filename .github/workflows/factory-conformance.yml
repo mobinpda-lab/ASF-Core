@@ -4,16 +4,11 @@ on:
   push:
     branches: [main, 'nira/**']
     paths:
-      - 'factory/**'
-      - 'docs/architecture/**'
-      - '.github/workflows/**'
-      - '.github/workflows/factory-conformance.yml'
+      - '**'
   pull_request:
     branches: [main]
     paths:
-      - 'factory/**'
-      - 'docs/architecture/**'
-      - '.github/workflows/**'
+      - '**'
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
@@ -42,6 +37,8 @@ jobs:
         run: |
           set -euo pipefail
           required=(
+            NIRA_IDENTITY.json
+            docs/history/NIRA_IDENTITY_HISTORY.md
             factory/contracts/schema.py
             factory/runtime/state_machine.py
             factory/gates/engine.py
@@ -53,48 +50,46 @@ jobs:
           for path in "${required[@]}"; do
             test -f "$path" || { echo "MISSING_NIRA_CANONICAL_SURFACE=$path"; exit 1; }
           done
+          jq -e '.schema_version == "1.1" and .canonical_name == "NIRA" and .repository_name == "NIRA" and .single_factory_authority == true and .historical_identifiers_may_be_active_authority == false' NIRA_IDENTITY.json >/dev/null
           jq -e '.schema_version == "1.0" and .promotion.enabled == true and (.promotion.max_candidates_per_cycle >= 1)' factory/registry/promotion-policy.json >/dev/null
           grep -q 'L10' README.md || {
             echo 'NIRA L10 status must remain explicit until authentic E2E evidence exists'; exit 1;
           }
-      - name: Audit active surfaces for legacy factory identity
+      - name: Audit every active source surface for legacy factory identity
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
 
-          # Build forbidden identifiers without embedding them literally in this gate,
-          # so the gate cannot fail because it contains its own patterns.
-          legacy = [
-              ''.join(map(chr, (65,83,70,95,77,79,67))),
-              ''.join(map(chr, (65,83,70,45,77,79,67))),
-              ''.join(map(chr, (65,83,70,95,70,65,67,84,79,82,89))),
-              ''.join(map(chr, (65,83,70,95,67,79,82,69))),
-              ''.join(map(chr, (65,83,70,32,77,79,67))),
-              ''.join(map(chr, (65,83,70,45,67,111,114,101,32,67,73))),
-              ''.join(map(chr, (97,115,102,45,99,111,114,101,45,116,101,115,116,45,114,101,115,117,108,116,115))),
-              ''.join(map(chr, (97,115,102,45,97,117,116,104,111,114,105,122,101,100))),
-          ]
-          roots = [Path('.github/workflows'), Path('factory'), Path('docs/architecture'), Path('README.md')]
-          files = []
-          for root in roots:
-              if root.is_file():
-                  files.append(root)
-              elif root.exists():
-                  files.extend(p for p in root.rglob('*') if p.is_file())
+          history = Path('docs/history/NIRA_IDENTITY_HISTORY.md')
+          if not history.is_file():
+              raise SystemExit('NIRA_IDENTITY_HISTORY_MISSING')
+
+          # Derive the forbidden legacy identifiers from the single historical record.
+          # The gate itself therefore does not need to embed those identifiers.
+          text = history.read_text(encoding='utf-8')
+          legacy = []
+          for line in text.splitlines():
+              if line.startswith('- `') and '` — ' in line:
+                  value = line[3:line.index('`', 3)]
+                  if value:
+                      legacy.append(value)
+          legacy.extend(x.lower() for x in legacy)
+
           findings = []
-          for path in sorted(set(files)):
-              if path.as_posix() == '.github/workflows/factory-conformance.yml':
+          for path in sorted(p for p in Path('.').rglob('*') if p.is_file()):
+              relative = path.as_posix()
+              if relative == history.as_posix() or relative.startswith('.git/'):
                   continue
               try:
-                  text = path.read_text(encoding='utf-8')
+                  content = path.read_text(encoding='utf-8')
               except (UnicodeDecodeError, OSError):
                   continue
-              for lineno, line in enumerate(text.splitlines(), 1):
+              for lineno, line in enumerate(content.splitlines(), 1):
                   for pattern in legacy:
                       if pattern in line:
-                          findings.append(f'{path}:{lineno}:{pattern}')
+                          findings.append(f'{relative}:{lineno}:{pattern}')
           if findings:
               Path('nira-naming-audit.txt').write_text('\n'.join(findings) + '\n', encoding='utf-8')
               print('LEGACY_IDENTITY_FOUND')
