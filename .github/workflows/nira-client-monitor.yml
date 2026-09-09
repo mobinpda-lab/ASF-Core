@@ -82,7 +82,12 @@ jobs:
               const open = await github.rest.issues.listForRepo({
                 owner: niraOwner, repo: niraRepo, state: 'open', per_page: 100
               });
-              const existing = open.data.find(i => !i.pull_request && i.title === title);
+              const existing = open.data.find(i =>
+                !i.pull_request &&
+                String(i.body || '').includes('<!-- nira-client-monitor-v1 -->') &&
+                String(i.body || '').includes('CLIENT_REPOSITORY: ' + repository) &&
+                String(i.body || '').includes('FAILED_WORKFLOW: ' + gate.name)
+              );
               if (run && ['failure','timed_out'].includes(run.conclusion)) {
                 if (!existing) {
                   await github.rest.issues.create({
@@ -120,6 +125,17 @@ jobs:
                         ].join('\n')
                       });
                     } else throw error;
+                  });
+                } else if (!String(existing.body || '').includes('CLIENT_MAIN_SHA: ' + mainSha)) {
+                  await github.rest.issues.createComment({
+                    owner: niraOwner, repo: niraRepo, issue_number: existing.number,
+                    body: [
+                      'NIRA_MONITOR_FAILURE=OBSERVED_AGAIN',
+                      'CLIENT_MAIN_SHA=' + mainSha,
+                      'FAILED_WORKFLOW=' + gate.name,
+                      'FAILED_RUN_ID=' + run.id,
+                      'FAILED_CONCLUSION=' + run.conclusion
+                    ].join('\n')
                   });
                 }
                 return;
