@@ -74,7 +74,7 @@ jobs:
           [[ "$required_label" != "null" && "$head_prefix" != "null" ]] || { echo "BLOCK invalid registry policy"; exit 1; }
 
           prs=$(gh api --paginate "repos/$repo/pulls?state=open&base=main&per_page=100" | jq -s 'add')
-          candidates=$(jq -c --arg label "$required_label" --arg prefix "$head_prefix" '[.[] | select(.mergeable != false and (.labels | map(.name) | index($label))) | select(.head.ref | startswith($prefix))] | sort_by(.number)' <<<"$prs")
+          candidates=$(jq -c --arg label "$required_label" --arg prefix "$head_prefix" '[.[] | select(.mergeable != false and (.labels | map(.name) | index($label))) | select(.head.ref | startswith($prefix))] | sort_by(.number)'<<<"$prs")
           count=$(jq 'length' <<<"$candidates")
           echo "DISCOVERY candidates=$count label=$required_label prefix=$head_prefix"
           [[ "$count" -le "$max_candidates" ]] || { echo "BLOCK candidate overflow count=$count max=$max_candidates"; exit 1; }
@@ -99,10 +99,14 @@ jobs:
               fi
               artifact=$(jq -r --arg wf "$wf" '.promotion.required_artifacts[$wf] // (if .promotion.required_workflow == $wf then .promotion.required_artifact else empty end) // empty' "$policy")
               if [[ -n "$artifact" ]]; then
-                artifact_json=$(GH_TOKEN="$ACTIONS_READ_TOKEN" gh api "repos/$repo/actions/runs/$run_id/artifacts")
-                artifact_count=$(jq --arg artifact "$artifact" '[.artifacts[] | select(.name == $artifact and .expired == false)] | length' <<<"$artifact_json")
+                # Some GitHub token contexts return 404 for the run-scoped artifact
+                # endpoint even when the run and repository are readable. Query the
+                # repository artifact index instead, then bind the artifact back to the
+                # exact workflow run id and head SHA. This remains fail-closed.
+                artifact_json=$(GH_TOKEN="$ACTIONS_READ_TOKEN" gh api --paginate "repos/$repo/actions/artifacts?name=$(printf '%s' "$artifact" | jq -sRr @uri)&per_page=100")
+                artifact_count=$(jq --arg artifact "$artifact" --argjson run_id "$run_id" --arg sha "$head" '[.artifacts[] | select(.name == $artifact and .expired == false and .workflow_run.id == $run_id and .workflow_run.head_sha == $sha)] | length' <<<"$artifact_json")
                 if [[ "$artifact_count" -eq 0 ]]; then
-                  echo "BLOCK PR#$pr workflow=$wf run=$run_id missing artifact=$artifact"
+                  echo "BLOCK PR#$pr workflow=$wf run=$run_id missing exact artifact=$artifact"
                   all_green=false
                 fi
               fi
