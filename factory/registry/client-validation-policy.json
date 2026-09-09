@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0",
+  "authority": "NIRA",
+  "mode": "client-native-workflow-observation",
+  "clients": {
+    "mobinpda-lab/Arvin-clean": {
+      "project_id": "arvin-clean",
+      "fast": [
+        {
+          "name": "Arvin Parallel Wave",
+          "workflow": "parallel-wave.yml",
+          "dispatchable": true
+        }
+      ],
+      "heavy": [
+        {
+          "name": "Arvin Build",
+          "workflow": "build.yml",
+          "dispatchable": true
+        },
+        {
+          "name": "Arvin Device Smoke",
+          "workflow": "device-smoke.yml",
+          "dispatchable": true
+        }
+      ]
+    },
+    "mobinpda-lab/YadNegar": {
+      "project_id": "yadnegar",
+      "fast": [
+        {
+          "name": "YadNegar CI",
+          "workflow": "flutter-ci.yml",
+          "dispatchable": true
+        }
+      ],
+      "heavy": [
+        {
+          "name": "YadNegar Android Build",
+          "workflow": "android-build.yml",
+          "dispatchable": true
+        }
+      ]
+    },
+    "mobinpda-lab/NetworkCenterMonitor": {
+      "project_id": "network-center-monitor",
+      "fast": [
+        {
+          "name": "Android CI",
+          "workflow": "android-ci.yml",
+          "dispatchable": false
+        }
+      ],
+      "heavy": [
+        {
+          "name": "Android Device Smoke",
+          "workflow": "device-smoke.yml",
+          "dispatchable": true
+        },
+        {
+          "name": "Android Security",
+          "workflow": "security.yml",
+          "dispatchable": false
+        }
+      ]
+    }
+  }
+}
