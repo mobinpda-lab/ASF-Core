@@ -1,6 +1,6 @@
 # NIRA Project State
 
-> Generated operating snapshot. GitHub repository state is authoritative if this snapshot is stale.
+> GitHub-derived operating snapshot. GitHub repository state is authoritative if this snapshot is stale.
 
 - Current Phase: Autonomous production hardening
 - Current Objective: Prove repeatable end-to-end registered-client production with independent evidence
