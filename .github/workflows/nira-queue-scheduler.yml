@@ -61,25 +61,77 @@ jobs:
             });
             const activeAi = active.filter(x => laneFor(x) === 'AI').length;
             const activeDeterministic = active.filter(x => laneFor(x) === 'DETERMINISTIC').length;
+            const queuedAiIssues = work.filter(x =>
+              labelsFor(x).has('factory:queued') && laneFor(x) === 'AI'
+            );
+            let providerPressure = 0;
+            let repeatedFailures = 0;
+            let successfulSignals = 0;
+            let failedSignals = 0;
+            for (const issue of work) {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: issue.number, per_page: 100
+              });
+              if (comments.some(c => c.body?.includes('NIRA_PROVIDER_PRESSURE=TRANSIENT'))) providerPressure += 1;
+              if (comments.filter(c => c.body?.includes('NIRA_FEEDBACK_CLASS=')).length >= 2) repeatedFailures += 1;
+              if (comments.some(c => c.body?.includes('NIRA_CLIENT_PROMOTION=VERIFIED') || c.body?.includes('NIRA_LEASE=HANDED_TO_PR'))) successfulSignals += 1;
+              if (comments.some(c => c.body?.includes('NIRA_FEEDBACK=ESCALATED') || c.body?.includes('NIRA_WORKER=FAILED_NON_PROVIDER'))) failedSignals += 1;
+            }
+            const totalSignals = successfulSignals + failedSignals;
+            const successRate = totalSignals > 0 ? successfulSignals / totalSignals : 1.0;
+            let maxAi = 1;
+            let capacityReason = 'HOLD';
+            if (providerPressure > 0) {
+              maxAi = 1;
+              capacityReason = 'PROVIDER_PRESSURE';
+            } else if (repeatedFailures >= 2 || successRate < 0.70) {
+              maxAi = 1;
+              capacityReason = 'QUALITY_DEGRADED';
+            } else if (queuedAiIssues.length >= 6 && successRate >= 0.90) {
+              maxAi = 4;
+              capacityReason = 'HEALTHY_BACKLOG_HIGH';
+            } else if (queuedAiIssues.length >= 3 && successRate >= 0.90) {
+              maxAi = 2;
+              capacityReason = 'HEALTHY_BACKLOG';
+            }
+            const activeAiRepos = new Set(
+              active.filter(x => laneFor(x) === 'AI')
+                .map(x => String(x.body || '').match(/CLIENT_REPOSITORY:\s*([^\s\n]+)/i)?.[1] || '')
+                .filter(Boolean)
+            );
             let aiSlots = process.env.AI_PROVIDER_AVAILABLE === 'true'
-              ? Math.max(0, 1 - activeAi) : 0;
+              ? Math.max(0, maxAi - activeAi) : 0;
             let deterministicSlots = Math.max(0, 4 - activeDeterministic);
 
             core.info(
-              'capacity ai=' + activeAi + '/1 available=' + aiSlots +
-              ' provider=' + process.env.AI_PROVIDER_AVAILABLE +
+              'capacity ai=' + activeAi + '/' + maxAi + ' available=' + aiSlots +
+              ' reason=' + capacityReason + ' success_rate=' + successRate.toFixed(3) +
+              ' provider_pressure=' + providerPressure + ' repeated_failures=' + repeatedFailures +
               ' deterministic=' + activeDeterministic + '/4 available=' + deterministicSlots
             );
 
             const candidates = work
-              .map(issue => ({ issue, labels: labelsFor(issue), lane: laneFor(issue) }))
+              .map(issue => ({
+                issue,
+                labels: labelsFor(issue),
+                lane: laneFor(issue),
+                clientRepository: String(issue.body || '').match(/CLIENT_REPOSITORY:\s*([^\s\n]+)/i)?.[1] || ''
+              }))
               .filter(x => x.labels.has('factory:queued'))
               .filter(x => !x.labels.has('factory:leased') && !x.labels.has('factory:in-progress'))
               .filter(x => ![...blocked].some(label => x.labels.has(label)))
               .sort((a, b) => priority(a.labels) - priority(b.labels) || a.issue.number - b.issue.number);
 
             for (const item of candidates) {
+              if (!item.clientRepository) {
+                core.warning('#' + item.issue.number + ': missing CLIENT_REPOSITORY; scheduler will not lease.');
+                continue;
+              }
               if (item.lane === 'AI' && aiSlots <= 0) continue;
+              if (item.lane === 'AI' && activeAiRepos.has(item.clientRepository)) {
+                core.info('#' + item.issue.number + ': active AI lease already owns client ' + item.clientRepository);
+                continue;
+              }
               if (item.lane === 'DETERMINISTIC' && deterministicSlots <= 0) continue;
 
               const comments = await github.paginate(github.rest.issues.listComments, {
@@ -135,8 +187,12 @@ jobs:
                     scheduler_run_id: schedulerRun
                   }
                 });
-                if (item.lane === 'AI') aiSlots -= 1;
-                else deterministicSlots -= 1;
+                if (item.lane === 'AI') {
+                  aiSlots -= 1;
+                  activeAiRepos.add(item.clientRepository);
+                } else {
+                  deterministicSlots -= 1;
+                }
                 core.notice('NIRA_SCHEDULER_DISPATCH=REQUESTED issue=' + item.issue.number + ' lane=' + item.lane);
               } catch (error) {
                 await github.rest.issues.createComment({
