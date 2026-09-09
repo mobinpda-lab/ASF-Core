@@ -190,3 +190,23 @@ def test_orchestrator_explicitly_wakes_canonical_scheduler():
     assert "Wake canonical queue scheduler" in orchestrator
     assert "nira-queue-scheduler.yml" in orchestrator
     assert "NIRA_SCHEDULER_WAKE=ORCHESTRATOR" in orchestrator
+
+
+def test_state_sync_is_derived_and_never_writes_main_directly():
+    wf = read(".github/workflows/nira-state-sync.yml")
+    assert "GitHub-derived" in read("docs/PROJECT_STATE.md")
+    assert "nira/state-sync" in wf
+    assert "docs(nira): sync derived project state" in wf
+    assert "ref: 'refs/heads/' + branchName" in wf
+    assert "ref: main" not in wf.split("createOrUpdateFileContents", 1)[1].split("});", 1)[0]
+    assert "nira-authorized" in wf
+    assert "pulls.create" in wf
+
+
+def test_required_operating_documents_exist_and_keep_github_authoritative():
+    state = read("docs/PROJECT_STATE.md")
+    roadmap = read("docs/ROADMAP_QUEUE.md")
+    decisions = read("docs/DECISIONS.md")
+    assert "GitHub" in state and "authoritative" in state.lower()
+    assert "## NOW" in roadmap and "## NEXT" in roadmap and "## LATER" in roadmap
+    assert "append-only decision ledger" in decisions.lower()
