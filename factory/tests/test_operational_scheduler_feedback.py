@@ -210,3 +210,13 @@ def test_required_operating_documents_exist_and_keep_github_authoritative():
     assert "GitHub" in state and "authoritative" in state.lower()
     assert "## NOW" in roadmap and "## NEXT" in roadmap and "## LATER" in roadmap
     assert "append-only decision ledger" in decisions.lower()
+
+
+def test_state_sync_avoids_recursive_workflow_run_storms_and_partial_cancel_races():
+    wf = read(".github/workflows/nira-state-sync.yml")
+    header = wf.split("permissions:", 1)[0]
+    assert "workflow_run:" not in header
+    assert "push:" in header and "branches: [main]" in header
+    assert "schedule:" in header
+    assert "cancel-in-progress: false" in wf
+    assert "Current main was produced by state sync; skip self-induced resync." in wf
