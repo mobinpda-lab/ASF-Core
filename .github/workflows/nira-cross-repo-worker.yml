@@ -317,7 +317,8 @@ jobs:
                 pr_number: process.env.CLIENT_PR,
                 expected_head_sha: process.env.CLIENT_HEAD,
                 control_issue_number: process.env.CONTROL_ISSUE_NUMBER,
-                stage: 'all'
+                stage: 'all',
+                promote: 'true'
               }
             });
             core.notice(
