@@ -48,7 +48,7 @@ jobs:
             test -f "$path" || { echo "MISSING_NIRA_CANONICAL_SURFACE=$path"; exit 1; }
           done
           jq -e '.schema_version == "1.1" and .canonical_name == "NIRA" and .repository_name == "NIRA" and .single_factory_authority == true and .historical_identifiers_may_be_active_authority == false' NIRA_IDENTITY.json >/dev/null
-          jq -e '.schema_version == "1.0" and .promotion.enabled == true and (.promotion.max_candidates_per_cycle >= 1)' factory/registry/promotion-policy.json >/dev/null
+          jq -e '.schema_version == "1.1" and .promotion.enabled == true and (.promotion.max_candidates_per_cycle >= 1) and (.promotion.required_workflows | length >= 4)' factory/registry/promotion-policy.json >/dev/null
           grep -q 'L10' README.md || {
             echo 'NIRA L10 status must remain explicit until authentic E2E evidence exists'; exit 1;
           }
