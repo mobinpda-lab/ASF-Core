@@ -3,14 +3,8 @@ name: NIRA Factory E2E
 on:
   push:
     branches: [main, 'nira/**']
-    paths:
-      - 'factory/**'
-      - '.github/workflows/**'
   pull_request:
     branches: [main]
-    paths:
-      - 'factory/**'
-      - '.github/workflows/**'
   schedule:
     - cron: '*/30 * * * *'
   workflow_dispatch:
