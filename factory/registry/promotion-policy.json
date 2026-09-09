@@ -1,13 +1,24 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "promotion": {
     "enabled": true,
     "required_label": "nira-authorized",
     "head_branch_prefix": "nira/",
-    "required_workflow": "NIRA CI",
-    "required_artifact": "nira-test-results",
+    "required_workflows": [
+      "NIRA CI",
+      "NIRA Factory E2E",
+      "NIRA Factory Conformance",
+      "NIRA Security Gate"
+    ],
+    "required_artifacts": {
+      "NIRA CI": "nira-test-results",
+      "NIRA Factory E2E": "nira-factory-e2e-evidence",
+      "NIRA Factory Conformance": "nira-naming-audit",
+      "NIRA Security Gate": null
+    },
     "max_candidates_per_cycle": 1,
     "require_base_main_exact_head": true,
-    "require_postcondition_main_advance": true
+    "require_postcondition_main_advance": true,
+    "auto_ready_when_all_gates_pass": true
   }
 }
