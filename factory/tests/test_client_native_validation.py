@@ -86,3 +86,11 @@ def test_client_promotion_persists_truth_independent_of_optional_issue_metadata(
     assert "Completion comment failed after verified merge" in promotion
     assert "Optional completion label unavailable" in promotion
     assert "Upload cross-repository promotion evidence" in promotion
+
+
+def test_client_validation_is_read_only_by_default_and_worker_opts_into_promotion():
+    validation = read(".github/workflows/nira-client-validation.yml")
+    worker = read(".github/workflows/nira-cross-repo-worker.yml")
+    assert "default: false" in validation
+    assert "inputs.promote == true" in validation
+    assert "promote: 'true'" in worker
