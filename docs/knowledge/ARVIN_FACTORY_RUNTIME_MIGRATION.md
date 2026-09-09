@@ -3,7 +3,7 @@
 Status: ACTIVE MIGRATION SOURCE
 Source repository: mobinpda-lab/Arvin-clean
 Source baseline: 9a773b7898ff63276ad6a214009b163f904e8923
-Target repository: mobinpda-lab/ASF-Core
+Target repository: mobinpda-lab/NIRA
 Target branch: feat/nira-arvin-factory-migration-v1
 
 ## Purpose
