@@ -54,3 +54,7 @@ NIRA has the architectural boundary, production orchestrator bootstrap, canonica
 The complete historical naming transition is recorded in `docs/history/NIRA_IDENTITY_HISTORY.md`. Historical identifiers are provenance only and are never active factory authority.
 
 See `docs/architecture/NIRA_FACTORY_CONTROL_PLANE_v1.md` and `docs/architecture/NIRA_INDEPENDENT_FACTORY_ARCHITECTURE.md` for the canonical boundary and implementation contract.
+
+## Self-dogfood execution
+
+NIRA can execute bounded maintenance against its own repository while remaining a separate control plane from product clients. Self-dogfood work is leased against the exact current `main` SHA, protected by lease/fence validation, executed on a dedicated branch, and proposed through a pull request. Workers have no merge or promotion authority. Promotion remains fail-closed behind exact-head NIRA CI, Factory E2E, Factory Conformance, Security Gate, independent artifacts/evidence, and post-merge verification. Recovery and retries are bounded, and lessons learned from Arvin are generalized into NIRA-owned contracts without importing Arvin product logic.
