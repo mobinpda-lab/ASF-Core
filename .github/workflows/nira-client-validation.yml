@@ -25,6 +25,11 @@ on:
         default: all
         type: choice
         options: [fast, heavy, all]
+      promote:
+        description: 'Hand verified evidence to NIRA Client Promotion'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -193,7 +198,7 @@ jobs:
           if-no-files-found: error
 
       - name: Hand verified client head to separate promotion authority
-        if: success()
+        if: success() && inputs.promote == true
         uses: actions/github-script@v7
         with:
           github-token: ${{ github.token }}
