@@ -78,14 +78,17 @@ projects:
       base: main
       required_label: nira-authorized
     ci_contract:
-      required_workflow: NIRA CI
+      mode: client_native
+      validation_policy: factory/registry/client-validation-policy.json
     required_checks:
-      - NIRA CI
+      - Arvin Parallel Wave
+      - Arvin Build
+      - Arvin Device Smoke
     security_gates:
       - exact_head
       - exact_base
-    artifact_requirements:
-      - nira-test-results
+      - independent_client_native_evidence
+    artifact_requirements: []
     promotion_policy:
       enabled: true
       authorization: nira
@@ -126,14 +129,16 @@ projects:
       base: main
       required_label: nira-authorized
     ci_contract:
-      required_workflow: NIRA CI
+      mode: client_native
+      validation_policy: factory/registry/client-validation-policy.json
     required_checks:
-      - NIRA CI
+      - YadNegar CI
+      - YadNegar Android Build
     security_gates:
       - exact_head
       - exact_base
-    artifact_requirements:
-      - nira-test-results
+      - independent_client_native_evidence
+    artifact_requirements: []
     promotion_policy:
       enabled: true
       authorization: nira
@@ -174,14 +179,17 @@ projects:
       base: main
       required_label: nira-authorized
     ci_contract:
-      required_workflow: NIRA CI
+      mode: client_native
+      validation_policy: factory/registry/client-validation-policy.json
     required_checks:
-      - NIRA CI
+      - Android CI
+      - Android Device Smoke
+      - Android Security
     security_gates:
       - exact_head
       - exact_base
-    artifact_requirements:
-      - nira-test-results
+      - independent_client_native_evidence
+    artifact_requirements: []
     promotion_policy:
       enabled: true
       authorization: nira
