@@ -110,3 +110,28 @@ def test_control_issue_identity_is_supported_by_both_worker_lanes():
     assert "control_issue_number:" in deterministic
     assert "CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}" in ai_worker
     assert "CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}" in deterministic
+
+
+def test_worker_repairs_only_locally_invalid_model_outputs_with_bounded_budget():
+    worker = read(".github/workflows/nira-cross-repo-worker.yml")
+    assert "requestValidatedJson" in worker
+    assert "attempt <= 2" in worker
+    assert "OUTPUT_INVALID_AFTER_REPAIR" in worker
+    assert "Do not broaden scope" in worker
+    assert "NIRA_PROVIDER_PRESSURE_HTTP_" in worker
+    assert "responses(request)" in worker
+    assert "replacement payload exceeds bounded size" in worker
+
+
+def test_factory_pulse_is_read_only_and_reports_operational_state_not_fake_progress():
+    pulse = read(".github/workflows/nira-factory-pulse.yml")
+    assert "issues: read" in pulse
+    assert "pull-requests: read" in pulse
+    assert "contents: read" in pulse
+    assert "issues: write" not in pulse
+    assert "pull-requests: write" not in pulse
+    assert "mutation_authority: 'NONE'" in pulse
+    assert "provider_cooldown_active" in pulse
+    assert "oldest_queued_age_seconds" in pulse
+    assert "authorized_candidates" in pulse
+    assert "percentage" not in pulse.lower()
