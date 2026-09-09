@@ -44,6 +44,7 @@ jobs:
             .github/workflows/nira-queue-scheduler.yml
             .github/workflows/nira-failure-feedback.yml
             .github/workflows/nira-main-closure.yml
+            .github/workflows/nira-factory-pulse.yml
             factory/adapters/generic.py
             factory/registry/projects.example.yaml
             factory/registry/promotion-policy.json

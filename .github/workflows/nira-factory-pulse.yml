@@ -1,0 +1,123 @@
+name: NIRA Factory Pulse
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: nira-factory-pulse
+  cancel-in-progress: true
+
+jobs:
+  pulse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Observe live factory state without mutation
+        id: pulse
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const now = Date.now();
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', per_page: 100
+            });
+            const work = issues.filter(x => !x.pull_request);
+            const labelsFor = issue => new Set(
+              (issue.labels || []).map(x => typeof x === 'string' ? x : x.name)
+            );
+            const laneFor = issue =>
+              /NIRA_EXECUTION_MODE:\s*deterministic-doc-append/i.test(issue.body || '')
+                ? 'DETERMINISTIC' : 'AI';
+
+            let providerCooldownActive = 0;
+            let oldestQueuedAgeSeconds = 0;
+            for (const issue of work) {
+              const labels = labelsFor(issue);
+              if (labels.has('factory:queued')) {
+                const created = Date.parse(issue.created_at || '');
+                if (Number.isFinite(created)) {
+                  oldestQueuedAgeSeconds = Math.max(
+                    oldestQueuedAgeSeconds,
+                    Math.floor((now - created) / 1000)
+                  );
+                }
+              }
+              if (laneFor(issue) !== 'AI' || !labels.has('factory:queued')) continue;
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: issue.number, per_page: 100
+              });
+              const pressure = comments
+                .filter(c => c.body?.includes('<!-- nira-provider-pressure-v1 -->'))
+                .sort((a,b) => new Date(b.created_at) - new Date(a.created_at))[0];
+              const untilText = pressure?.body?.match(/NIRA_PROVIDER_COOLDOWN_UNTIL=([^\s]+)/i)?.[1] || '';
+              const untilMs = Date.parse(untilText);
+              if (Number.isFinite(untilMs) && now < untilMs) providerCooldownActive += 1;
+            }
+
+            const pulls = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', base: 'main', per_page: 100
+            });
+            const main = await github.rest.repos.getBranch({owner, repo, branch: 'main'});
+            const count = predicate => work.filter(predicate).length;
+            const pulse = {
+              schema_version: '1.0',
+              repository: owner + '/' + repo,
+              exact_main_sha: main.data.commit.sha,
+              collected_at: new Date().toISOString(),
+              queue: {
+                total_open_factory_work: count(x => {
+                  const l = labelsFor(x);
+                  return l.has('factory:ready') || l.has('factory:queued') ||
+                    l.has('factory:leased') || l.has('factory:in-progress');
+                }),
+                queued: count(x => labelsFor(x).has('factory:queued')),
+                leased: count(x => labelsFor(x).has('factory:leased')),
+                in_progress: count(x => labelsFor(x).has('factory:in-progress')),
+                blocked: count(x => labelsFor(x).has('factory:blocked')),
+                escalated: count(x => labelsFor(x).has('factory:escalated')),
+                ai_queued: count(x => labelsFor(x).has('factory:queued') && laneFor(x) === 'AI'),
+                deterministic_queued: count(x => labelsFor(x).has('factory:queued') && laneFor(x) === 'DETERMINISTIC'),
+                provider_cooldown_active: providerCooldownActive,
+                oldest_queued_age_seconds: oldestQueuedAgeSeconds
+              },
+              promotion: {
+                open_nira_branches: pulls.filter(pr => String(pr.head?.ref || '').startsWith('nira/')).length,
+                authorized_candidates: pulls.filter(pr =>
+                  String(pr.head?.ref || '').startsWith('nira/') &&
+                  (pr.labels || []).some(label => label.name === 'nira-authorized')
+                ).length
+              },
+              observation_state: 'OBSERVED',
+              mutation_authority: 'NONE',
+              observer_identity: 'nira-factory-pulse'
+            };
+            fs.writeFileSync(
+              'nira-factory-pulse.json',
+              JSON.stringify(pulse, null, 2) + '\n',
+              'utf8'
+            );
+            core.notice(
+              'NIRA_PULSE queued=' + pulse.queue.queued +
+              ' leased=' + pulse.queue.leased +
+              ' cooldown=' + pulse.queue.provider_cooldown_active +
+              ' candidates=' + pulse.promotion.authorized_candidates
+            );
+
+      - name: Upload operational pulse evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: nira-factory-pulse-${{ github.run_id }}
+          path: nira-factory-pulse.json
+          if-no-files-found: error
