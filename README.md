@@ -1,17 +1,17 @@
 # NIRA
 
-**NIRA** is the official name of the autonomous software factory control plane.
+**NIRA** is the official and sole canonical name of the autonomous software factory control plane.
 
-**GitHub repository identity:** `mobinpda-lab/ASF-Core` (current GitHub repository slug retained for compatibility, links, provenance, and history).
+**Repository identity:** `mobinpda-lab/NIRA` after the repository rename. The former repository slug is retained only in the historical record and must not be used as an active authority identifier.
 
 ## Mission
 
-NIRA is the **independent factory control plane** for operating multiple software repositories. Product repositories are workloads/clients of NIRA, never containers of the factory core.
+NIRA is the independent factory control plane for operating multiple software repositories. Product repositories are workloads/clients of NIRA, never containers of the factory core.
 
 ## Canonical boundary
 
 ```text
-NIRA (GitHub repository: ASF-Core)
+NIRA
   Governance / Registry / Intake / Queue / Lease / Fencing
   Workers / Execution / Evidence / Gates / Security
   Promotion / Release / Recovery / Audit / Observability
@@ -50,5 +50,7 @@ IDEA -> DEFINITION -> ARCHITECTURE -> TASK -> QUEUE -> LEASE
 NIRA has the architectural boundary, production orchestrator bootstrap, canonical contracts, fail-closed lifecycle primitives, evidence model foundation, gate primitives, recovery policy and conformance tests in place.
 
 **L10 remains `UNVERIFIED` until a real registered client task produces reconstructible end-to-end factory evidence, including bounded failure/fencing/recovery and release/promotion evidence.**
+
+The complete historical naming transition is recorded in `docs/history/NIRA_IDENTITY_HISTORY.md`. Historical identifiers are provenance only and are never active factory authority.
 
 See `docs/architecture/NIRA_FACTORY_CONTROL_PLANE_v1.md` and `docs/architecture/NIRA_INDEPENDENT_FACTORY_ARCHITECTURE.md` for the canonical boundary and implementation contract.
