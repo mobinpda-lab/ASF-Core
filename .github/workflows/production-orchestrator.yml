@@ -79,9 +79,12 @@ jobs:
           prs=$(GH_TOKEN="$READ_TOKEN" gh api --paginate "repos/$repo/pulls?state=open&base=main&per_page=100" | jq -s 'add')
           candidates=$(jq -c --arg label "$required_label" --arg prefix "$head_prefix" '[.[] | select(.mergeable != false and (.labels | map(.name) | index($label))) | select(.head.ref | startswith($prefix))] | sort_by(.number)' <<<"$prs")
           count=$(jq 'length' <<<"$candidates")
-          echo "DISCOVERY candidates=$count label=$required_label prefix=$head_prefix"
-          [[ "$count" -le "$max_candidates" ]] || { echo "BLOCK candidate overflow count=$count max=$max_candidates"; exit 1; }
+          echo "DISCOVERY candidates=$count label=$required_label prefix=$head_prefix budget=$max_candidates"
           [[ "$count" != "0" ]] || { echo "NO_AUTHORIZED_CANDIDATE"; exit 0; }
+          [[ "$max_candidates" =~ ^[0-9]+$ && "$max_candidates" -ge 1 ]] || { echo "BLOCK invalid candidate budget=$max_candidates"; exit 1; }
+          candidates=$(jq -c --argjson max "$max_candidates" '.[0:$max]' <<<"$candidates")
+          selected_count=$(jq 'length' <<<"$candidates")
+          echo "SELECTION selected=$selected_count deferred=$((count-selected_count))"
 
           while IFS= read -r row; do
             pr=$(jq -r '.number' <<<"$row")
@@ -154,4 +157,5 @@ jobs:
             [[ "$new_main" != "$current_main" ]] || { echo "BLOCK PR#$pr main unchanged"; exit 1; }
 
             gh workflow run production-orchestrator.yml --repo "$repo" --ref main
+            break
           done < <(jq -c '.[]' <<<"$candidates")
