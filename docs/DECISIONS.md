@@ -43,3 +43,15 @@ This is the append-only decision ledger for factory-level choices. Product-speci
 ## ADR-009 — Generated state must not bypass promotion
 
 **Decision:** Project-state snapshots are updated through a `nira/` branch and normal NIRA promotion, never by direct writes to protected `main`.
+
+## ADR-010 — Release remains client-native
+
+**Decision:** NIRA may orchestrate and verify release, but product repositories own their release workflows, signing/build inputs, and release semantics. NIRA never embeds product build commands in release policy.
+
+**Reason:** Preserve factory independence while still providing end-to-end autonomous release.
+
+## ADR-011 — Monitoring creates evidence before repair
+
+**Decision:** NIRA Client Monitor may create/reconcile recovery issues from exact-main workflow failures, but it never directly launches AI repair. Monitoring evidence must be classified before bounded repair is queued.
+
+**Reason:** Prevent transient, environment, security, or permission failures from being misclassified as code defects.
