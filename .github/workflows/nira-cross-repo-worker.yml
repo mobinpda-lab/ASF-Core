@@ -33,7 +33,7 @@ concurrency:
   group: nira-worker-${{ inputs.repository }}-${{ inputs.issue_number }}
   cancel-in-progress: false
 env:
-  REGISTERED_REPOSITORIES: 'mobinpda-lab/ASF-Core mobinpda-lab/Arvin-clean mobinpda-lab/YadNegar mobinpda-lab/NetworkCenterMonitor'
+  REGISTERED_REPOSITORIES: 'mobinpda-lab/Arvin-clean mobinpda-lab/YadNegar mobinpda-lab/NetworkCenterMonitor'
   OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
 jobs:
   execute:
@@ -55,7 +55,7 @@ jobs:
           test "$ISSUE_NUMBER" -gt 0
           test "$FENCE_TOKEN" -gt 0
           case "$CLIENT_REPOSITORY" in
-            mobinpda-lab/ASF-Core|mobinpda-lab/Arvin-clean|mobinpda-lab/YadNegar|mobinpda-lab/NetworkCenterMonitor) ;;
+            mobinpda-lab/Arvin-clean|mobinpda-lab/YadNegar|mobinpda-lab/NetworkCenterMonitor) ;;
             *) echo 'NIRA_FENCING=REJECTED_REPOSITORY' >&2; exit 1 ;;
           esac
           test "${#EXPECTED_MAIN_SHA}" -eq 40
@@ -67,7 +67,7 @@ jobs:
           app-id: ${{ fromJSON(secrets.NIRA_GITHUB_APP_ID) }}
           private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
           owner: mobinpda-lab
-          repositories: ASF-Core,Arvin-clean,YadNegar,NetworkCenterMonitor
+          repositories: Arvin-clean,YadNegar,NetworkCenterMonitor
       - name: Run bounded real code worker
         id: execute
         uses: actions/github-script@v7
@@ -142,7 +142,7 @@ jobs:
             }
 
             const patchResult = parseJson(outputText(await responses([
-              { role: 'system', content: [{ type: 'input_text', text: 'You are the NIRA bounded code worker. Fix only the supplied issue using the supplied files. Preserve architecture and existing patterns. Do not invent dependencies. Do not change secrets, workflows, CI policy, permissions, release controls, or unrelated behavior. Return JSON only: {"summary":"...","patches":[{"path":"exact existing path","content":"complete replacement UTF-8 file content"}]}. Maximum 8 patches. If the issue cannot be safely fixed from the supplied context, return {"summary":"BLOCKED: ...","patches":[]}. Never return markdown fences.' }] },
+              { role: 'system', content: [{ role: 'system', content: [{ type: 'input_text', text: 'You are the NIRA bounded code worker. Fix only the supplied issue using the supplied files. Preserve architecture and existing patterns. Do not invent dependencies. Do not change secrets, workflows, CI policy, permissions, release controls, or unrelated behavior. Return JSON only: {"summary":"...","patches":[{"path":"exact existing path","content":"complete replacement UTF-8 file content"}]}. Maximum 8 patches. If the issue cannot be safely fixed from the supplied context, return {"summary":"BLOCKED: ...","patches":[]}. Never return markdown fences.' }] }] },
               { role: 'user', content: [{ type: 'input_text', text: `Repository: ${process.env.CLIENT_REPOSITORY}\nIssue #${process.env.ISSUE_NUMBER}: ${issue.data.title}\n${issue.data.body || ''}\n\nExact leased main SHA: ${observed}\n\nFiles:\n${files.map(f => `--- ${f.path} (sha ${f.sha}) ---\n${f.content}`).join('\n')}` }] }
             ])));
             if (!Array.isArray(patchResult.patches) || patchResult.patches.length === 0) throw new Error(`NIRA_NO_SAFE_PATCH=${patchResult.summary || 'worker returned no patch'}`);
