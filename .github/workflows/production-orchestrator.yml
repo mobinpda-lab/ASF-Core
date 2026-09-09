@@ -51,6 +51,7 @@ jobs:
       - name: Discover and promote registry-authorized candidates
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ACTIONS_READ_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -98,10 +99,9 @@ jobs:
               fi
               artifact=$(jq -r --arg wf "$wf" '.promotion.required_artifacts[$wf] // (if .promotion.required_workflow == $wf then .promotion.required_artifact else empty end) // empty' "$policy")
               if [[ -n "$artifact" ]]; then
-                # Installation tokens can read the repository artifact index while the
-                # run-scoped artifact route may return 404. Bind the indexed artifact
-                # back to the exact run id and head SHA, and fail closed on any mismatch.
-                artifact_json=$(gh api --paginate "repos/$repo/actions/artifacts?name=$(printf '%s' "$artifact" | jq -sRr @uri)&per_page=100" | jq -s '{artifacts: (map(.artifacts // []) | add)}')
+                # Use the workflow-scoped token for Actions artifact visibility.
+                # Keep the installation token isolated for promotion/cross-repository authority.
+                artifact_json=$(GH_TOKEN="$ACTIONS_READ_TOKEN" gh api --paginate "repos/$repo/actions/artifacts?name=$(printf '%s' "$artifact" | jq -sRr @uri)&per_page=100" | jq -s '{artifacts: (map(.artifacts // []) | add)}')
                 artifact_count=$(jq --arg artifact "$artifact" --arg run_id "$run_id" --arg sha "$head" '[.artifacts[] | select(.name == $artifact and .expired == false and ((.workflow_run.id | tostring) == $run_id) and .workflow_run.head_sha == $sha)] | length' <<<"$artifact_json")
                 if [[ "$artifact_count" -eq 0 ]]; then
                   echo "BLOCK PR#$pr workflow=$wf run=$run_id missing exact artifact=$artifact"
