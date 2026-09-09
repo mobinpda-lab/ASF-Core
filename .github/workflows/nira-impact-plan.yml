@@ -1,0 +1,83 @@
+name: NIRA Change Impact Plan
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: nira-impact-plan-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Compute deterministic changed-file impact
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "$BASE_SHA" ]; then
+            git diff --name-only "$BASE_SHA...$HEAD_SHA" > nira-changed-files.txt
+          else
+            git diff --name-only HEAD^ HEAD > nira-changed-files.txt || true
+          fi
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from factory.routing.impact import decide_impact
+
+          changed = tuple(
+              line.strip() for line in Path("nira-changed-files.txt").read_text(encoding="utf-8").splitlines()
+              if line.strip()
+          )
+          decision = decide_impact(changed)
+          evidence = {
+              "schema_version": "1.0",
+              "authority": "NIRA",
+              "exact_head_sha": os.environ["HEAD_SHA"],
+              "base_sha": os.environ.get("BASE_SHA") or None,
+              "changed_files": list(changed),
+              "validation_path": decision.path.value,
+              "risk": decision.risk,
+              "reasons": list(decision.reasons),
+              "promotion_authority": "UNCHANGED",
+              "observation_state": "VERIFIED",
+              "collector_identity": "nira-change-impact-plan",
+          }
+          Path("nira-impact-plan.json").write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(
+              "NIRA_IMPACT_PATH=" + decision.path.value +
+              " RISK=" + decision.risk +
+              " FILES=" + str(len(changed))
+          )
+          PY
+          jq -e '.observation_state == "VERIFIED" and (.exact_head_sha | length) == 40 and (.validation_path == "FAST" or .validation_path == "HEAVY" or .validation_path == "FULL")' nira-impact-plan.json >/dev/null
+
+      - name: Upload exact-head impact evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: nira-impact-plan-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            nira-impact-plan.json
+            nira-changed-files.txt
+          if-no-files-found: error
