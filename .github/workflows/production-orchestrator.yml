@@ -47,11 +47,11 @@ jobs:
           private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
           owner: mobinpda-lab
           repositories: NIRA,Arvin-clean,YadNegar,NetworkCenterMonitor
+          permission-actions: read
 
       - name: Discover and promote registry-authorized candidates
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          ACTIONS_READ_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -99,13 +99,15 @@ jobs:
               fi
               artifact=$(jq -r --arg wf "$wf" '.promotion.required_artifacts[$wf] // (if .promotion.required_workflow == $wf then .promotion.required_artifact else empty end) // empty' "$policy")
               if [[ -n "$artifact" ]]; then
-                # Use the workflow-scoped token for Actions artifact visibility.
-                # Keep the installation token isolated for promotion/cross-repository authority.
-                artifact_json=$(GH_TOKEN="$ACTIONS_READ_TOKEN" gh api --paginate "repos/$repo/actions/artifacts?name=$(printf '%s' "$artifact" | jq -sRr @uri)&per_page=100" | jq -s '{artifacts: (map(.artifacts // []) | add)}')
+                artifact_url="repos/$repo/actions/runs/$run_id/artifacts"
+                echo "VERIFY_ARTIFACT pr=$pr workflow=$wf run=$run_id artifact=$artifact head=$head"
+                artifact_json=$(gh api --paginate "$artifact_url?per_page=100" | jq -s '{artifacts: (map(.artifacts // []) | add)}')
                 artifact_count=$(jq --arg artifact "$artifact" --arg run_id "$run_id" --arg sha "$head" '[.artifacts[] | select(.name == $artifact and .expired == false and ((.workflow_run.id | tostring) == $run_id) and .workflow_run.head_sha == $sha)] | length' <<<"$artifact_json")
                 if [[ "$artifact_count" -eq 0 ]]; then
                   echo "BLOCK PR#$pr workflow=$wf run=$run_id missing exact artifact=$artifact"
                   all_green=false
+                else
+                  echo "ARTIFACT_OK pr=$pr workflow=$wf run=$run_id artifact=$artifact head=$head"
                 fi
               fi
             done
