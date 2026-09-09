@@ -68,3 +68,34 @@ def test_local_promotion_authority_does_not_depend_on_cross_repo_app():
     assert "Mint GitHub App installation token" not in orchestrator
     assert "NIRA_INSTALLATION_ID" not in orchestrator
     assert "actions/create-github-app-token@v2" in worker
+
+
+def test_provider_pressure_releases_lease_and_scheduler_honors_cooldown():
+    worker = read(".github/workflows/nira-cross-repo-worker.yml")
+    scheduler = read(".github/workflows/nira-queue-scheduler.yml")
+    lease = read(".github/workflows/nira-lease.yml")
+
+    assert "control_issue_number" in lease
+    assert "control_issue_number" in worker
+    assert "NIRA_PROVIDER_PRESSURE_HTTP_" in worker
+    assert "[429, 502, 503, 504]" in worker
+    assert "NIRA_PROVIDER_COOLDOWN_UNTIL" in worker
+    assert "ACTION=RELEASE_LEASE_AND_REQUEUE" in worker
+    assert "PRODUCT_FAILURE_CLAIMED=false" in worker
+    assert "workflow_id: 'nira-queue-scheduler.yml'" in worker
+    assert "NIRA_PROVIDER_COOLDOWN_UNTIL" in scheduler
+    assert "provider cooldown active until" in scheduler
+
+
+def test_main_closure_revalidates_exact_final_main_without_promotion_authority():
+    closure = read(".github/workflows/nira-main-closure.yml")
+    assert "workflows: ['NIRA Production Orchestrator']" in closure
+    assert "contents: read" in closure
+    assert "contents: write" not in closure
+    assert "ref: main" in closure
+    assert "git rev-parse origin/main" in closure
+    assert "python -m pytest -q factory/tests" in closure
+    assert "nira-main-closure.json" in closure
+    assert "observation_state" in closure
+    assert "validator_identity" in closure
+    assert "pull-requests: write" not in closure
