@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   request:
-    if: github.event.issue.pull_request == null && contains(github.event.issue.body || '', 'NIRA_VALIDATION_REQUEST: true')
+    if: "${{ github.event.issue.pull_request == null && contains(github.event.issue.body || '', 'NIRA_VALIDATION_REQUEST: true') }}"
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

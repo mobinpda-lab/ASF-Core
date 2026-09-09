@@ -1,0 +1,239 @@
+name: NIRA State Sync
+
+on:
+  workflow_run:
+    workflows: ['NIRA Production Orchestrator', 'NIRA Main Closure']
+    types: [completed]
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: nira-state-sync
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Mint scoped state-sync token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.NIRA_GITHUB_APP_ID }}
+          private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
+          owner: mobinpda-lab
+          repositories: NIRA
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+          permission-actions: read
+
+      - name: Derive state from live GitHub and update one canonical snapshot PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const {owner, repo} = context.repo;
+            const main = await github.rest.repos.getBranch({owner, repo, branch: 'main'});
+            const mainSha = main.data.commit.sha;
+
+            const associated = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner, repo, commit_sha: mainSha
+            });
+            if (associated.data.some(pr => pr.title === 'docs(nira): sync derived project state')) {
+              core.info('Current main was produced by state sync; skip self-induced resync.');
+              return;
+            }
+
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', per_page: 100
+            });
+            const work = issues.filter(x => !x.pull_request);
+            const pulls = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', base: 'main', per_page: 100
+            });
+            const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+              owner, repo, branch: 'main', per_page: 100
+            });
+            const canonicalNames = [
+              'NIRA CI', 'NIRA Factory E2E', 'NIRA Factory Conformance',
+              'NIRA Security Gate', 'NIRA Main Closure'
+            ];
+            const latestValidation = {};
+            for (const name of canonicalNames) {
+              const run = runs.filter(r => r.name === name).sort((a,b) => b.id - a.id)[0];
+              latestValidation[name] = run
+                ? {id: run.id, status: run.status, conclusion: run.conclusion, head_sha: run.head_sha}
+                : null;
+            }
+
+            const labelsFor = issue => new Set(
+              (issue.labels || []).map(x => typeof x === 'string' ? x : x.name)
+            );
+            const statusFor = issue => {
+              const labels = labelsFor(issue);
+              if (labels.has('factory:escalated')) return 'ESCALATED';
+              if (labels.has('factory:blocked')) return 'BLOCKED';
+              if (labels.has('factory:in-progress')) return 'IN_PROGRESS';
+              if (labels.has('factory:leased')) return 'LEASED';
+              if (labels.has('factory:queued')) return 'QUEUED';
+              if (labels.has('factory:ready')) return 'READY';
+              return 'OPEN';
+            };
+            const priorityFor = issue => {
+              const labels = labelsFor(issue);
+              if (labels.has('priority:release-blocker')) return 0;
+              if (labels.has('priority:core')) return 1;
+              if (labels.has('priority:automation')) return 2;
+              if (labels.has('priority:feature')) return 3;
+              return 4;
+            };
+
+            const active = work
+              .filter(i => ['READY','QUEUED','LEASED','IN_PROGRESS','BLOCKED','ESCALATED'].includes(statusFor(i)))
+              .sort((a,b) => priorityFor(a) - priorityFor(b) || a.number - b.number);
+            const now = active.filter(i => priorityFor(i) <= 1 || ['LEASED','IN_PROGRESS','BLOCKED','ESCALATED'].includes(statusFor(i)));
+            const next = active.filter(i => !now.includes(i) && priorityFor(i) <= 3);
+            const later = active.filter(i => !now.includes(i) && !next.includes(i));
+
+            const blocker = active.find(i => ['BLOCKED','ESCALATED'].includes(statusFor(i)));
+            const activePr = pulls.sort((a,b) => a.number - b.number)[0] || null;
+            const latestGateLine = canonicalNames.map(name => {
+              const r = latestValidation[name];
+              return r ? name + '=' + r.status + '/' + (r.conclusion || 'pending') + '@' + String(r.head_sha || '').slice(0,12) : name + '=NOT_EXPOSED';
+            }).join('; ');
+
+            const esc = s => String(s || '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+            const state = [
+              '# NIRA Project State', '',
+              '> Generated from live GitHub state. Repository/Issues/PRs/Actions remain authoritative.', '',
+              '- Current Phase: Autonomous production and evidence hardening',
+              '- Current Objective: Prove repeatable registered-client production to reconstructible completion evidence',
+              '- Active Task: ' + (now[0] ? '#' + now[0].number + ' ' + esc(now[0].title) : 'none'),
+              '- Completed Tasks: See merged PRs and exact-main closure evidence',
+              '- Current Blocker: ' + (blocker ? '#' + blocker.number + ' ' + esc(blocker.title) : 'none observed'),
+              '- Next Action: ' + (now[0] ? 'Continue canonical path for #' + now[0].number : (next[0] ? 'Promote #' + next[0].number + ' into NOW when dependencies are satisfied' : 'Observe queue and registered clients')),
+              '- Latest Commit SHA: `' + mainSha + '`',
+              '- Active Pull Request: ' + (activePr ? '#' + activePr.number + ' ' + esc(activePr.title) + ' @ ' + activePr.head.sha : 'none'),
+              '- Latest Validation Result: ' + latestGateLine,
+              '', '## Snapshot Counts', '',
+              '- Open factory work: ' + active.length,
+              '- NOW: ' + now.length,
+              '- NEXT: ' + next.length,
+              '- LATER: ' + later.length,
+              '- Open PRs to main: ' + pulls.length,
+              '', '## Authority', '',
+              'This file is derived evidence. Live GitHub state overrides it whenever they differ.',
+              ''
+            ].join('\n');
+
+            const table = items => {
+              if (!items.length) return '| — | — | — | — | — |\n';
+              return items.map(i => {
+                const labels = [...labelsFor(i)].sort().join(', ');
+                return '| #' + i.number + ' | ' + esc(i.title) + ' | P' + priorityFor(i) + ' | ' + statusFor(i) + ' | ' + esc(labels) + ' |';
+              }).join('\n') + '\n';
+            };
+            const roadmap = [
+              '# NIRA Roadmap Queue', '',
+              '> Generated from live GitHub Issues. Issue state/labels are authoritative.', '',
+              '## NOW', '',
+              '| Task | Goal | Priority | Status | Evidence/Labels |',
+              '|---|---|---:|---|---|',
+              table(now).trimEnd(), '',
+              '## NEXT', '',
+              '| Task | Goal | Priority | Status | Evidence/Labels |',
+              '|---|---|---:|---|---|',
+              table(next).trimEnd(), '',
+              '## LATER', '',
+              '| Task | Goal | Priority | Status | Evidence/Labels |',
+              '|---|---|---:|---|---|',
+              table(later).trimEnd(), '',
+              '## Queue Contract', '',
+              '- Existing code/issues/PRs/branches must be reused before new work is created.',
+              '- Independent repositories may execute in parallel; competing mutations against one client main are serialized.',
+              '- Failure is routed through classification/recovery; it is never counted as completion.',
+              '- Completion requires exact-SHA execution evidence.',
+              ''
+            ].join('\n');
+
+            async function currentFile(path) {
+              try {
+                const r = await github.rest.repos.getContent({owner, repo, path, ref: mainSha});
+                return Buffer.from(r.data.content, 'base64').toString('utf8');
+              } catch (e) {
+                if (e.status === 404) return '';
+                throw e;
+              }
+            }
+            const currentState = await currentFile('docs/PROJECT_STATE.md');
+            const currentRoadmap = await currentFile('docs/ROADMAP_QUEUE.md');
+            if (currentState === state && currentRoadmap === roadmap) {
+              core.info('Derived state unchanged; no PR required.');
+              return;
+            }
+
+            const branchName = 'nira/state-sync';
+            let branchSha = mainSha;
+            try {
+              const ref = await github.rest.git.getRef({owner, repo, ref: 'heads/' + branchName});
+              branchSha = ref.data.object.sha;
+              if (branchSha !== mainSha) {
+                await github.rest.git.updateRef({
+                  owner, repo, ref: 'heads/' + branchName, sha: mainSha, force: true
+                });
+                branchSha = mainSha;
+              }
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              await github.rest.git.createRef({owner, repo, ref: 'refs/heads/' + branchName, sha: mainSha});
+            }
+
+            async function write(path, content, message) {
+              let sha;
+              try {
+                const r = await github.rest.repos.getContent({owner, repo, path, ref: branchName});
+                sha = r.data.sha;
+              } catch (e) {
+                if (e.status !== 404) throw e;
+              }
+              await github.rest.repos.createOrUpdateFileContents({
+                owner, repo, path, branch: branchName, sha,
+                message, content: Buffer.from(content, 'utf8').toString('base64')
+              });
+            }
+            await write('docs/PROJECT_STATE.md', state, 'docs(nira): sync derived project state');
+            await write('docs/ROADMAP_QUEUE.md', roadmap, 'docs(nira): sync derived roadmap queue');
+
+            const existingPrs = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', head: owner + ':' + branchName, base: 'main', per_page: 100
+            });
+            let pr = existingPrs[0];
+            if (!pr) {
+              const created = await github.rest.pulls.create({
+                owner, repo, head: branchName, base: 'main',
+                title: 'docs(nira): sync derived project state',
+                body: 'Automated GitHub-derived snapshot. GitHub remains source of truth. No factory policy, runtime, promotion, or product logic changes.',
+                draft: false
+              });
+              pr = created.data;
+            }
+            await github.rest.issues.addLabels({
+              owner, repo, issue_number: pr.number, labels: ['nira-authorized']
+            }).catch(e => core.warning('Could not add nira-authorized label: ' + e.message));
+            core.notice('NIRA_STATE_SYNC_PR=' + pr.number + ' MAIN=' + mainSha);

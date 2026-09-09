@@ -44,6 +44,11 @@ jobs:
             factory/scheduling/adaptive.py
             factory/intelligence/failure.py
             factory/routing/impact.py
+            .github/workflows/nira-state-sync.yml
+            factory/routing/worker_roles.py
+            docs/DECISIONS.md
+            docs/ROADMAP_QUEUE.md
+            docs/PROJECT_STATE.md
             .github/workflows/nira-queue-scheduler.yml
             .github/workflows/nira-impact-plan.yml
             .github/workflows/nira-failure-feedback.yml
