@@ -86,12 +86,16 @@ jobs:
           set -euo pipefail
           ref="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
           lowered="$(printf '%s' "$ref" | tr '[:upper:]' '[:lower:]')"
-          case "$lowered" in
-            *asf-core*|*asf_moc*|*asf-moc*)
+          history='docs/history/NIRA_IDENTITY_HISTORY.md'
+          mapfile -t legacy < <(sed -n 's/^- `\\([^`]*\\)` — .*/\\1/p' "$history")
+          for pattern in "${legacy[@]}"; do
+            needle="$(printf '%s' "$pattern" | tr '[:upper:]' '[:lower:]')"
+            [[ -n "$needle" ]] || continue
+            if [[ "$lowered" == *"$needle"* ]]; then
               echo "LEGACY_BRANCH_IDENTITY_FOUND=$ref"
               exit 1
-              ;;
-          esac
+            fi
+          done
           echo "LEGACY_BRANCH_IDENTITY_FOUND=0"
 
       - name: Upload naming audit evidence
