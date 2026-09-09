@@ -34,7 +34,7 @@ concurrency:
   cancel-in-progress: false
 env:
   REGISTERED_REPOSITORIES: 'mobinpda-lab/NIRA mobinpda-lab/Arvin-clean mobinpda-lab/YadNegar mobinpda-lab/NetworkCenterMonitor'
-  OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+  OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5.6' }}
 jobs:
   execute:
     runs-on: ubuntu-latest
