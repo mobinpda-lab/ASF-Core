@@ -51,6 +51,7 @@ jobs:
       - name: Discover and promote registry-authorized candidates
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ACTIONS_READ_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -98,7 +99,7 @@ jobs:
               fi
               artifact=$(jq -r --arg wf "$wf" '.promotion.required_artifacts[$wf] // (if .promotion.required_workflow == $wf then .promotion.required_artifact else empty end) // empty' "$policy")
               if [[ -n "$artifact" ]]; then
-                artifact_json=$(gh api "repos/$repo/actions/runs/$run_id/artifacts")
+                artifact_json=$(GH_TOKEN="$ACTIONS_READ_TOKEN" gh api "repos/$repo/actions/runs/$run_id/artifacts")
                 artifact_count=$(jq --arg artifact "$artifact" '[.artifacts[] | select(.name == $artifact and .expired == false)] | length' <<<"$artifact_json")
                 if [[ "$artifact_count" -eq 0 ]]; then
                   echo "BLOCK PR#$pr workflow=$wf run=$run_id missing artifact=$artifact"
