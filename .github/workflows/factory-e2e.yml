@@ -46,7 +46,7 @@ jobs:
           from pathlib import Path
           report = {
             "schema_version": "1.0",
-            "repo": "mobinpda-lab/ASF-Core",
+            "repo": "mobinpda-lab/NIRA",
             "exact_head_sha": os.environ["E2E_HEAD_SHA"],
             "workflow": "NIRA Factory E2E",
             "run_id": int(os.environ["E2E_RUN_ID"]),
