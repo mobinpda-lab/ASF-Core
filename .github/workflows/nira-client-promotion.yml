@@ -182,30 +182,59 @@ jobs:
               throw new Error('NIRA_CLIENT_PROMOTION=POSTCONDITION_MAIN_MISMATCH');
             }
 
+            const promotionEvidence = {
+              schema_version: '1.0',
+              authority: 'NIRA Client Promotion',
+              repository,
+              control_issue_number: controlIssueNumber,
+              pr_number: prNumber,
+              lease_id: leaseId,
+              leased_main_sha: leasedMain,
+              validated_head_sha: expectedHead,
+              pre_merge_main_sha: currentMain,
+              post_merge_main_sha: mergedMain.data.object.sha,
+              gates: evidence,
+              observation_state: 'VERIFIED',
+              confidence: 'HIGH',
+              observed_at: new Date().toISOString()
+            };
+            fs.writeFileSync(
+              'nira-client-promotion-evidence.json',
+              JSON.stringify(promotionEvidence, null, 2) + '\n'
+            );
+
+            const completionBody = [
+              '<!-- nira-client-promotion-v1 -->',
+              'NIRA_CLIENT_PROMOTION=VERIFIED',
+              'CLIENT_REPOSITORY=' + repository,
+              'CLIENT_PR=' + prNumber,
+              'VALIDATED_HEAD=' + expectedHead,
+              'PRE_MERGE_MAIN=' + currentMain,
+              'POST_MERGE_MAIN=' + mergedMain.data.object.sha,
+              'LEASE_ID=' + leaseId,
+              'GATES=' + evidence.map(x => x.name + ':' + x.run_id).join(',')
+            ].join('\n');
             await github.rest.issues.createComment({
               owner: context.repo.owner, repo: context.repo.repo,
-              issue_number: controlIssueNumber,
-              body: [
-                '<!-- nira-client-promotion-v1 -->',
-                'NIRA_CLIENT_PROMOTION=VERIFIED',
-                'CLIENT_REPOSITORY=' + repository,
-                'CLIENT_PR=' + prNumber,
-                'VALIDATED_HEAD=' + expectedHead,
-                'PRE_MERGE_MAIN=' + currentMain,
-                'POST_MERGE_MAIN=' + mergedMain.data.object.sha,
-                'LEASE_ID=' + leaseId,
-                'GATES=' + evidence.map(x => x.name + ':' + x.run_id).join(',')
-              ].join('\n')
-            });
+              issue_number: controlIssueNumber, body: completionBody
+            }).catch(error => core.warning('Completion comment failed after verified merge: ' + error.message));
             await github.rest.issues.addLabels({
               owner: context.repo.owner, repo: context.repo.repo,
               issue_number: controlIssueNumber,
               labels: ['factory:completed']
-            });
+            }).catch(error => core.warning('Optional completion label unavailable: ' + error.message));
             core.notice(
               'NIRA_CLIENT_PROMOTION=VERIFIED repo=' + repository +
               ' pr=' + prNumber + ' main=' + mergedMain.data.object.sha
             );
+
+      - name: Upload cross-repository promotion evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nira-client-promotion-${{ inputs.pr_number }}-${{ inputs.expected_head_sha }}
+          path: nira-client-promotion-evidence.json
+          if-no-files-found: error
 
       - name: Wake NIRA scheduler after client promotion
         if: success()
