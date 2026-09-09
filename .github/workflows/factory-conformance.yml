@@ -40,6 +40,9 @@ jobs:
             factory/gates/engine.py
             factory/recovery/policy.py
             factory/feedback/provider_pressure.py
+            factory/scheduling/policy.py
+            .github/workflows/nira-queue-scheduler.yml
+            .github/workflows/nira-failure-feedback.yml
             factory/adapters/generic.py
             factory/registry/projects.example.yaml
             factory/registry/promotion-policy.json

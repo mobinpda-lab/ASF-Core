@@ -14,7 +14,7 @@ on:
     - cron: '*/5 * * * *'
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
   actions: write
   issues: read
@@ -26,7 +26,6 @@ concurrency:
 env:
   REPO: ${{ github.repository }}
   POLICY: factory/registry/promotion-policy.json
-  NIRA_INSTALLATION_ID: '153019703'
 
 jobs:
   promote:
@@ -39,19 +38,9 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Mint GitHub App installation token
-        id: app-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.NIRA_GITHUB_APP_ID }}
-          private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
-          owner: mobinpda-lab
-          repositories: NIRA,Arvin-clean,YadNegar,NetworkCenterMonitor
-          permission-actions: read
-
       - name: Discover and promote registry-authorized candidates
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           READ_TOKEN: ${{ github.token }}
         shell: bash
         run: |
