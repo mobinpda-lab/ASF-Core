@@ -2,7 +2,7 @@
 
 **Status:** Canonical architectural decision  
 **Applies to:** NIRA autonomous software factory  
-**Repository:** `mobinpda-lab/ASF-Core` (current GitHub repository slug retained for compatibility)  
+**Repository:** `mobinpda-lab/NIRA`  
 **Issue:** #11
 
 ## 1. Purpose
@@ -14,8 +14,8 @@ NIRA is an independent system. Product repositories are workloads/clients of NIR
 ## 2. Canonical topology
 
 ```text
-                         NIRA / ASF-Core
-                    Independent Factory System
+                         NIRA
+                 Independent Factory System
                               |
                     +---------+---------+
                     |                   |
@@ -171,6 +171,6 @@ The canonical model is:
 
 > **NIRA is the factory. Products are independent clients/workloads.**
 
-The GitHub repository slug `ASF-Core` is retained only as the current repository identifier for compatibility, links, provenance, and history.
+Historical naming is isolated in `docs/history/NIRA_IDENTITY_HISTORY.md` and is not an active repository or authority identifier.
 
 This boundary is mandatory for future implementation, reporting, documentation, automation, and L10 claims.
