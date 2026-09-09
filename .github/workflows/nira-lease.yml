@@ -106,10 +106,17 @@ jobs:
               body: `<!-- nira-lease-v1 -->\nNIRA_LEASE=ACQUIRED\nISSUE=${issue.number}\nCLIENT_REPOSITORY=${clientRepository}\nCLIENT_ISSUE=${clientIssue}\nWORKER_IDENTITY=${workerId}\nLEASE_ID=${leaseId}\nFENCE_TOKEN=${fenceToken}\nLEASE_RUN_ID=${context.runId}\nLEASE_SHA=${context.sha}\nEXPECTED_CLIENT_MAIN_SHA=${expectedMainSha}\nLEASE_TTL_SECONDS=300\nHEARTBEAT_SECONDS=60`
             });
 
+            const deterministic = /NIRA_EXECUTION_MODE:\s*deterministic-doc-append/i.test(issue.body || '');
+            const workerWorkflow = deterministic
+              ? 'nira-deterministic-doc-worker.yml'
+              : 'nira-cross-repo-worker.yml';
+            if (deterministic && clientRepository !== 'mobinpda-lab/NIRA') {
+              throw new Error('DETERMINISTIC_DOC_MODE_SELF_DOGFOOD_ONLY');
+            }
             await github.rest.actions.createWorkflowDispatch({
               owner,
               repo,
-              workflow_id: 'nira-cross-repo-worker.yml',
+              workflow_id: workerWorkflow,
               ref: context.ref.replace('refs/heads/', ''),
               inputs: {
                 repository: clientRepository,
@@ -120,6 +127,7 @@ jobs:
                 fence_token: fenceToken
               }
             });
+            core.notice(`NIRA_WORKER_MODE=${deterministic ? 'DETERMINISTIC_DOC_APPEND' : 'AI_BOUNDED'}`);
             core.notice(`NIRA_LEASE=ACQUIRED issue=${issue.number}`);
             core.notice(`NIRA_CLIENT=${clientRepository}#${clientIssue}`);
             core.notice(`NIRA_EXPECTED_CLIENT_MAIN_SHA=${expectedMainSha}`);
