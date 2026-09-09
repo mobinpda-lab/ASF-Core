@@ -7,6 +7,10 @@ on:
         description: 'NIRA self-dogfood repository'
         required: true
         type: string
+      control_issue_number:
+        description: 'NIRA control-plane issue number owning this lease'
+        required: true
+        type: string
       issue_number:
         description: 'NIRA issue number'
         required: true
@@ -43,6 +47,7 @@ jobs:
         shell: bash
         env:
           CLIENT_REPOSITORY: ${{ inputs.repository }}
+          CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
           WORKER_ID: ${{ inputs.worker_id }}
           LEASE_ID: ${{ inputs.lease_id }}
@@ -51,6 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$CLIENT_REPOSITORY" = 'mobinpda-lab/NIRA'
+          test "$CONTROL_ISSUE_NUMBER" -gt 0
           test "$ISSUE_NUMBER" -gt 0
           test -n "$WORKER_ID"
           test -n "$LEASE_ID"
@@ -153,6 +159,7 @@ jobs:
             fs.writeFileSync('nira-deterministic-worker-evidence.txt', [
               'NIRA_EXECUTION=DETERMINISTIC_DOC_APPEND',
               `NIRA_CLIENT_REPOSITORY=${process.env.CLIENT_REPOSITORY}`,
+              `NIRA_CONTROL_ISSUE=${process.env.CONTROL_ISSUE_NUMBER}`,
               `NIRA_ISSUE=${process.env.ISSUE_NUMBER}`,
               `NIRA_EXPECTED_MAIN_SHA=${observed}`,
               `NIRA_WORKER_ID=${process.env.WORKER_ID}`,
