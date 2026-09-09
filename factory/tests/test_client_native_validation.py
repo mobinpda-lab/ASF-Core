@@ -97,3 +97,9 @@ def test_issue_frontdoor_resolves_exact_client_head_and_never_promotes():
     assert "promote: 'false'" in workflow
     assert "FORK_REJECTED" in workflow
     assert "pulls.merge" not in workflow
+
+
+def test_validation_request_if_expression_is_yaml_safe():
+    workflow = read(".github/workflows/nira-client-validation-request.yml")
+    assert 'if: "${{ github.event.issue.pull_request == null' in workflow
+    assert "NIRA_VALIDATION_REQUEST: true" in workflow
