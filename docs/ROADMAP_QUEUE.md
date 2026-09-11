@@ -1,6 +1,7 @@
 # NIRA Roadmap Queue
 
 > Generated from live GitHub Issues. Issue state/labels are authoritative.
+> Operational alignment: NIRA Autonomous Software Factory Operating Standard v2.0
 
 ## NOW
 
@@ -21,22 +22,24 @@
 | Task | Goal | Priority | Status | Evidence/Labels |
 |---|---|---:|---|---|
 | #27 | feat(nira): provision real cross-repository execution plane | P4 | QUEUED | enhancement, factory:queued |
-| #97 | [AUTO-FIX] NIRA Factory Conformance failed at a9e7e8f9f385 | P4 | QUEUED | factory:queued, factory:ready |
-| #98 | [AUTO-FIX] NIRA Factory Conformance failed at b09515921454 | P4 | QUEUED | factory:queued, factory:ready |
-| #102 | [AUTO-FIX] NIRA Factory Conformance failed at bb623564d33c | P4 | QUEUED | factory:queued, factory:ready |
-| #105 | [AUTO-FIX] NIRA Factory Conformance failed at 863264dff418 | P4 | QUEUED | factory:queued, factory:ready |
-| #108 | [AUTO-FIX] NIRA Factory Conformance failed at a06477c15df6 | P4 | QUEUED | factory:queued, factory:ready |
-| #112 | [AUTO-FIX] NIRA Factory Conformance failed at 6dadc2d0c27e | P4 | QUEUED | factory:queued, factory:ready |
-| #114 | [AUTO-FIX] NIRA Factory Conformance failed at 11ab21bd0856 | P4 | QUEUED | factory:queued, factory:ready |
-| #117 | [AUTO-FIX] NIRA Factory Conformance failed at 40c2c7b6bc62 | P4 | QUEUED | factory:queued, factory:ready |
-| #118 | [AUTO-FIX] NIRA Factory Conformance failed at 3e4f4502a36e | P4 | QUEUED | factory:queued, factory:ready |
-| #120 | [AUTO-FIX] NIRA Factory Conformance failed at 95ad0ad3fbc8 | P4 | QUEUED | factory:queued, factory:ready |
-| #122 | [AUTO-FIX] NIRA Factory Conformance failed at 9eda0a68543b | P4 | QUEUED | factory:queued, factory:ready |
-| #124 | [AUTO-FIX] NIRA Factory Conformance failed at adf775c73a05 | P4 | QUEUED | factory:queued, factory:ready |
-| #126 | [AUTO-FIX] NIRA Factory Conformance failed at b646c9d4f04d | P4 | QUEUED | factory:queued, factory:ready |
-| #128 | [AUTO-FIX] NIRA Factory Conformance failed at 4c47cba2a391 | P4 | QUEUED | factory:queued, factory:ready |
-| #129 | [AUTO-FIX] NIRA Factory Conformance failed at 7f09e9432e8d | P4 | QUEUED | factory:queued, factory:ready |
-| #134 | [AUTO-FIX] NIRA Factory Conformance failed at 1b213b6a799f | P4 | QUEUED | factory:queued, factory:ready |
+| #97 | [AUTO-FIX] NIRA Factory Conformance failed | P4 | QUEUED | factory:queued, factory:ready |
+
+## Standard v2 Task Contract
+
+Every new or modified task must define:
+
+- Task ID
+- Goal
+- Priority
+- Dependencies
+- Owner / Worker
+- Lease
+- Fence
+- Acceptance Criteria
+- Required Evidence
+- Validation Requirements
+- Promotion Requirements
+- Result
 
 ## Queue Contract
 
@@ -44,3 +47,4 @@
 - Independent repositories may execute in parallel; competing mutations against one client main are serialized.
 - Failure is routed through classification/recovery; it is never counted as completion.
 - Completion requires exact-SHA execution evidence.
+- Queue state must remain consistent with live GitHub state.
