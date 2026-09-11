@@ -2,23 +2,23 @@
 
 > GitHub-derived operating snapshot generated from live GitHub state. Repository/Issues/PRs/Actions remain authoritative.
 
+- Factory Standard: `NIRA Autonomous Software Factory Operating Standard v2.0`
+- Architecture Authority: `NIRA_FACTORY_CONTROL_PLANE_v1`
 - Current Phase: Autonomous production and evidence hardening
-- Current Objective: Prove repeatable registered-client production to reconstructible completion evidence
-- Active Task: #86 dogfood(nira): exact-main intelligence pipeline completion proof
-- Completed Tasks: See merged PRs and exact-main closure evidence
-- Current Blocker: #68 execute: YadNegar completion wave #244
-- Next Action: Continue canonical path for #86
-- Latest Commit SHA: `7135a2f40eb4b658bc8cd836843ae1679dcc9640`
-- Active Pull Request: #110 docs(nira): deterministic self-dogfood #86 @ 6abdd436299c408d4124700641c9557df6ede208
-- Latest Validation Result: NIRA CI=in_progress/pending@7135a2f40eb4; NIRA Factory E2E=in_progress/pending@7135a2f40eb4; NIRA Factory Conformance=in_progress/pending@7135a2f40eb4; NIRA Security Gate=in_progress/pending@7135a2f40eb4; NIRA Main Closure=pending/pending@7135a2f40eb4
+- Current Objective: Align NIRA implementation with v2 operating standard while preserving canonical control-plane rules
+- Active Task: #145 adopt NIRA Autonomous Software Factory Operating Standard v2.0 and align factory implementation
+- Completed Tasks: Governance standard document added to alignment branch
+- Current Blocker: Production evidence and validation required before promotion
+- Next Action: Complete alignment audit for state, queue, workflows and governance checks
+- Latest Commit SHA: `8be516fd1d4fdcdf35e06cc0bbeeb292719966ff`
+- Active Branch: `feature/nira-standard-v2-alignment`
+- Active Pull Request: Pending after alignment changes
+- Latest Validation Result: Pending alignment validation
 
 ## Snapshot Counts
 
-- Open factory work: 21
-- NOW: 2
-- NEXT: 2
-- LATER: 17
-- Open PRs to main: 2
+- Open factory work: Existing GitHub state
+- Alignment Work: Active
 
 ## Authority
 
