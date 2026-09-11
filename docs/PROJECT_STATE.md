@@ -1,6 +1,6 @@
 # NIRA Project State
 
-> Generated from live GitHub state. Repository/Issues/PRs/Actions remain authoritative.
+> GitHub-derived operating snapshot generated from live GitHub state. Repository/Issues/PRs/Actions remain authoritative.
 
 - Current Phase: Autonomous production and evidence hardening
 - Current Objective: Prove repeatable registered-client production to reconstructible completion evidence
