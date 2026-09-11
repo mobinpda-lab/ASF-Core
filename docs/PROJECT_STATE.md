@@ -22,4 +22,4 @@
 
 ## Authority
 
-This file is derived evidence. Live GitHub state overrides it whenever they differ.
+This file is GitHub-derived evidence. Live GitHub state overrides it whenever they differ.
