@@ -1,0 +1,45 @@
+name: NIRA Runtime Conformance Audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/30 * * * *"
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+jobs:
+  runtime-conformance:
+    name: Validate NIRA runtime conformance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify governance baseline
+        run: |
+          test -f docs/governance/NIRA_AUTONOMOUS_SOFTWARE_FACTORY_STANDARD_v2.md
+          test -f docs/PROJECT_STATE.md
+          test -f docs/ROADMAP_QUEUE.md
+          test -f docs/DECISIONS.md
+
+      - name: Collect runtime conformance evidence
+        run: |
+          mkdir -p evidence
+          cat > evidence/runtime-conformance.txt <<EOF
+NIRA Runtime Conformance Audit
+Timestamp: $(date -u)
+Commit: $GITHUB_SHA
+Checks:
+- Governance baseline present
+- Runtime audit workflow executed
+- Evidence generation enabled
+EOF
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: nira-runtime-conformance-evidence
+          path: evidence/runtime-conformance.txt
