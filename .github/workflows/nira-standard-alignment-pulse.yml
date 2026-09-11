@@ -1,0 +1,47 @@
+name: NIRA Standard Alignment Pulse
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  alignment-pulse:
+    name: Validate NIRA Standard v2 Alignment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify governing documents exist
+        run: |
+          test -f docs/governance/NIRA_AUTONOMOUS_SOFTWARE_FACTORY_STANDARD_v2.md
+          test -f docs/PROJECT_STATE.md
+          test -f docs/ROADMAP_QUEUE.md
+          test -f docs/DECISIONS.md
+
+      - name: Verify alignment markers
+        run: |
+          grep -q "NIRA Autonomous Software Factory Operating Standard v2.0" docs/PROJECT_STATE.md
+          grep -q "Queue Contract" docs/ROADMAP_QUEUE.md
+          grep -q "Workers never own promotion" docs/DECISIONS.md
+
+      - name: Generate alignment evidence
+        run: |
+          mkdir -p evidence
+          cat > evidence/nira-standard-alignment.txt <<EOF
+NIRA Standard Alignment Pulse
+Timestamp: $(date -u)
+Commit: $GITHUB_SHA
+Result: PASS
+EOF
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: nira-standard-alignment-evidence
+          path: evidence/nira-standard-alignment.txt
