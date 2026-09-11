@@ -1,17 +1,25 @@
 # NIRA Project State
 
-> GitHub-derived operating snapshot. GitHub repository state is authoritative if this snapshot is stale.
+> GitHub-derived operating snapshot generated from live GitHub state. Repository/Issues/PRs/Actions remain authoritative.
 
-- Current Phase: Autonomous production hardening
-- Current Objective: Prove repeatable end-to-end registered-client production with independent evidence
-- Active Task: See `docs/ROADMAP_QUEUE.md`
-- Completed Tasks: Canonical NIRA identity; queue/lease/fencing; bounded workers; adaptive scheduling; failure intelligence; exact-head impact planning; independent client-native validation; guarded NIRA and client promotion; main closure; recovery
-- Current Blocker: L10 remains unverified until a real registered client completes the full branch → CI/security → evidence → promotion/recovery lifecycle
-- Next Action: Execute the highest-priority eligible registered-client task through the canonical NIRA queue
-- Latest Commit SHA: `04875466be068cb27ce5d9bfcc3889e0e2adceff`
-- Active Pull Request: none at snapshot time
-- Latest Validation Result: latest promoted NIRA main was produced through registry-authorized promotion
+- Current Phase: Autonomous production and evidence hardening
+- Current Objective: Prove repeatable registered-client production to reconstructible completion evidence
+- Active Task: #86 dogfood(nira): exact-main intelligence pipeline completion proof
+- Completed Tasks: See merged PRs and exact-main closure evidence
+- Current Blocker: #68 execute: YadNegar completion wave #244
+- Next Action: Continue canonical path for #86
+- Latest Commit SHA: `f3b1700337fd95f9b0519234bb1ed5e9d08897fb`
+- Active Pull Request: #110 docs(nira): deterministic self-dogfood #86 @ 6abdd436299c408d4124700641c9557df6ede208
+- Latest Validation Result: NIRA CI=NOT_EXPOSED; NIRA Factory E2E=completed/success@f3b1700337fd; NIRA Factory Conformance=NOT_EXPOSED; NIRA Security Gate=NOT_EXPOSED; NIRA Main Closure=completed/success@f3b1700337fd
+
+## Snapshot Counts
+
+- Open factory work: 20
+- NOW: 2
+- NEXT: 2
+- LATER: 16
+- Open PRs to main: 3
 
 ## Authority
 
-This file is a derived snapshot. Live GitHub repository state, workflow runs, issue/PR state, exact commit SHAs, artifacts, and registered-client evidence override this document whenever they differ.
+This file is derived evidence. Live GitHub state overrides it whenever they differ.
