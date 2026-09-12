@@ -178,6 +178,21 @@ function setCoreOutput(core, name, value) {
   if (core && typeof core.setOutput === 'function') core.setOutput(name, String(value));
 }
 
+function boundedProviderAttempts(env) {
+  const configured = Number(env.NIRA_PROVIDER_ATTEMPTS_PER_PROVIDER || 2);
+  if (!Number.isFinite(configured)) return 2;
+  return Math.max(1, Math.min(Math.floor(configured), 3));
+}
+
+function retryableSameProviderFailure(failure) {
+  const status = Number(failure?.status || 0);
+  return !failure?.exhausted && (status === 0 || [502, 503, 504].includes(status));
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function routedResponse(input, options = {}) {
   const env = options.env || process.env;
   const core = options.core;
@@ -196,31 +211,49 @@ async function routedResponse(input, options = {}) {
 
   const attempts = [];
   const calls = providerMap();
+  const maxProviderAttempts = boundedProviderAttempts(env);
   for (const provider of providers) {
-    try {
-      if (core?.notice) core.notice(`NIRA_PROVIDER_ATTEMPT=${provider}`);
-      const result = await calls[provider]({ input, env, maxOutputTokens, expectJson, fetchFn });
-      if (!result) continue;
-      setCoreOutput(core, 'provider_pressure', 'false');
-      setCoreOutput(core, 'provider_exhausted', 'false');
-      setCoreOutput(core, 'provider_status', '200');
-      setCoreOutput(core, 'provider_retry_after', '');
-      setCoreOutput(core, 'provider_active', provider);
-      setCoreOutput(core, 'provider_attempts', attempts.length + 1);
-      if (core?.notice) core.notice(`NIRA_PROVIDER_ACTIVE=${provider} model=${result.model || ''}`);
-      return result;
-    } catch (error) {
-      const failure = error.niraProviderFailure || {
-        provider,
-        status: 0,
-        pressure: false,
-        exhausted: false,
-        retryAfter: 0,
-        detail: String(error.message || error).slice(0, 500)
-      };
-      attempts.push(failure);
-      if (core?.warning) {
-        core.warning(`NIRA_PROVIDER_FAILOVER provider=${provider} status=${failure.status} exhausted=${failure.exhausted} pressure=${failure.pressure}`);
+    for (let providerAttempt = 1; providerAttempt <= maxProviderAttempts; providerAttempt++) {
+      try {
+        if (core?.notice) core.notice(`NIRA_PROVIDER_ATTEMPT=${provider} attempt=${providerAttempt}/${maxProviderAttempts}`);
+        const result = await calls[provider]({ input, env, maxOutputTokens, expectJson, fetchFn });
+        if (!result) break;
+        setCoreOutput(core, 'provider_pressure', 'false');
+        setCoreOutput(core, 'provider_exhausted', 'false');
+        setCoreOutput(core, 'provider_status', '200');
+        setCoreOutput(core, 'provider_retry_after', '');
+        setCoreOutput(core, 'provider_active', provider);
+        setCoreOutput(core, 'provider_attempts', attempts.length + 1);
+        if (core?.notice) core.notice(`NIRA_PROVIDER_ACTIVE=${provider} model=${result.model || ''}`);
+        return result;
+      } catch (error) {
+        const failure = error.niraProviderFailure || {
+          provider,
+          status: 0,
+          pressure: false,
+          exhausted: false,
+          retryAfter: 0,
+          detail: String(error.message || error).slice(0, 500)
+        };
+        attempts.push({ ...failure, providerAttempt });
+        const retrySame = providerAttempt < maxProviderAttempts && retryableSameProviderFailure(failure);
+        if (retrySame) {
+          if (core?.warning) {
+            core.warning(
+              `NIRA_PROVIDER_RETRY provider=${provider} attempt=${providerAttempt}/${maxProviderAttempts} ` +
+              `status=${failure.status} bounded=true`
+            );
+          }
+          await delay(Math.min(1000 * providerAttempt, 2000));
+          continue;
+        }
+        if (core?.warning) {
+          core.warning(
+            `NIRA_PROVIDER_FAILOVER provider=${provider} status=${failure.status} ` +
+            `exhausted=${failure.exhausted} pressure=${failure.pressure}`
+          );
+        }
+        break;
       }
     }
   }
@@ -247,8 +280,10 @@ async function routedResponse(input, options = {}) {
 }
 
 module.exports = {
+  boundedProviderAttempts,
   classifyFailure,
   configuredProviderNames,
   normalizeMessages,
+  retryableSameProviderFailure,
   routedResponse
 };

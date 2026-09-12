@@ -39,6 +39,20 @@ def test_router_fails_over_before_declaring_global_capacity_exhaustion():
     assert "NIRA_BLOCKED=NO_AI_PROVIDER_CONFIGURED" in router
 
 
+def test_router_retries_transport_failure_on_same_provider_with_hard_bound():
+    router = read("factory/runtime/provider_router.js")
+    assert "NIRA_PROVIDER_ATTEMPTS_PER_PROVIDER" in router
+    assert "Math.max(1, Math.min(Math.floor(configured), 3))" in router
+    assert "providerAttempt <= maxProviderAttempts" in router
+    assert "NIRA_PROVIDER_RETRY" in router
+    assert "retryableSameProviderFailure" in router
+    assert "status === 0 || [502, 503, 504].includes(status)" in router
+    # A 429 is intentionally not retried on the same provider; the existing
+    # cooldown/failover authority handles provider pressure without storms.
+    retry_function = router.split("function retryableSameProviderFailure", 1)[1].split("function delay", 1)[0]
+    assert "429" not in retry_function
+
+
 def test_scheduler_accepts_any_configured_provider_not_only_openai():
     scheduler = read(".github/workflows/nira-queue-scheduler.yml")
     availability = next(
