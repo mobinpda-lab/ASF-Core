@@ -1,8 +1,8 @@
 """Deterministic decision policy for NIRA Autonomous Global Reconcile.
 
-The reconciler is deliberately side-effect free.  GitHub state is collected by
+The reconciler is deliberately side-effect free. GitHub state is collected by
 an Actions workflow, reduced to :class:`ReconcileSnapshot`, and then evaluated
-here.  Queue wake-up, bounded recovery and escalation are performed by the
+here. Queue wake-up, bounded recovery and escalation are performed by the
 workflow only after an exact-main race check.
 
 This module never dispatches a worker, writes ``main``, merges a pull request,
@@ -78,11 +78,12 @@ class GlobalReconciler:
         if self._has_active_execution(state):
             return ReconcileResult(
                 ReconcileDecision.WAIT,
-                "existing canonical execution or candidate PR is active",
+                "existing canonical execution is active",
             )
 
-        # Project work intentionally outranks factory improvement.  Product
-        # work is first, followed by release blockers, then bounded recovery.
+        # Product work outranks release blockers, bounded recovery and finally
+        # factory improvement. Related open PRs are filtered by the collector
+        # per issue; an unrelated PR must not stall the entire factory.
         if state.product_tasks:
             return ReconcileResult(
                 ReconcileDecision.CONTINUE,
@@ -136,7 +137,6 @@ class GlobalReconciler:
                 state.active_workers,
                 state.active_leases,
                 state.active_canonical_runs,
-                state.open_candidate_prs,
             )
         )
 
