@@ -137,7 +137,12 @@ jobs:
                 owner, repo, issue_number: issue.number, per_page: 100
               });
               if (comments.some(c => c.body?.includes('NIRA_PROVIDER_PRESSURE=TRANSIENT'))) providerPressure += 1;
-              if (comments.some(c => c.body?.includes('NIRA_PROVIDER_CAPACITY=EXHAUSTED'))) providerCapacityExhausted = true;
+              const latestCapacityEvent = comments
+                .filter(c => /NIRA_PROVIDER_CAPACITY=(EXHAUSTED|RESTORED)/.test(String(c.body || '')))
+                .sort((a,b) => new Date(b.created_at) - new Date(a.created_at))[0];
+              if (latestCapacityEvent?.body?.includes('NIRA_PROVIDER_CAPACITY=EXHAUSTED')) {
+                providerCapacityExhausted = true;
+              }
               if (comments.filter(c => c.body?.includes('NIRA_FEEDBACK_CLASS=')).length >= 2) repeatedFailures += 1;
               if (comments.some(c => c.body?.includes('NIRA_CLIENT_PROMOTION=VERIFIED') || c.body?.includes('NIRA_LEASE=HANDED_TO_PR'))) successfulSignals += 1;
               if (comments.some(c => c.body?.includes('NIRA_FEEDBACK=ESCALATED') || c.body?.includes('NIRA_WORKER=FAILED_NON_PROVIDER'))) failedSignals += 1;
