@@ -4,20 +4,20 @@ on:
   workflow_dispatch:
     inputs:
       repository:
-        description: 'Registered client repository (owner/name)'
+        description: 'NIRA self-proof repository; external clients remain blocked until NIRA self-certification'
         required: true
         type: string
-        default: mobinpda-lab/Arvin-clean
+        default: mobinpda-lab/NIRA
       issue_number:
-        description: 'Client proof issue number'
+        description: 'NIRA self-proof issue number'
         required: true
         type: string
-        default: '863'
+        default: '160'
       control_issue_number:
         description: 'NIRA control-plane issue number'
         required: true
         type: string
-        default: '171'
+        default: '157'
       worker_id:
         description: 'NIRA worker identity'
         required: true
@@ -45,7 +45,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Resolve exact client main HEAD
+      - name: Enforce NIRA-first L10 proof boundary
+        uses: actions/github-script@v7
+        env:
+          TARGET_REPOSITORY: ${{ inputs.repository }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const canonicalNira = `${context.repo.owner}/${context.repo.repo}`;
+            if (process.env.TARGET_REPOSITORY !== canonicalNira) {
+              core.setFailed(
+                'NIRA_L10=CLIENT_BLOCKED_UNTIL_NIRA_SELF_CERTIFIED ' +
+                'target=' + process.env.TARGET_REPOSITORY + ' canonical=' + canonicalNira
+              );
+              return;
+            }
+            core.notice('NIRA_L10_PROOF_SCOPE=NIRA_SELF_ONLY');
+
+      - name: Resolve exact NIRA main HEAD
         id: client_head
         uses: actions/github-script@v7
         env:
@@ -54,23 +71,14 @@ jobs:
           github-token: ${{ github.token }}
           script: |
             const [owner, repo] = process.env.CLIENT_REPOSITORY.split('/');
-            if (!owner || !repo || process.env.CLIENT_REPOSITORY.split('/').length !== 2) {
-              core.setFailed('NIRA_L10=REJECTED_INVALID_REPOSITORY');
-              return;
-            }
-            const allowed = new Set([
-              'mobinpda-lab/NIRA',
-              'mobinpda-lab/Arvin-clean',
-              'mobinpda-lab/YadNegar',
-              'mobinpda-lab/NetworkCenterMonitor'
-            ]);
-            if (!allowed.has(process.env.CLIENT_REPOSITORY)) {
-              core.setFailed('NIRA_L10=REJECTED_UNREGISTERED_CLIENT');
+            const canonicalNira = `${context.repo.owner}/${context.repo.repo}`;
+            if (process.env.CLIENT_REPOSITORY !== canonicalNira) {
+              core.setFailed('NIRA_L10=REJECTED_NON_NIRA_TARGET');
               return;
             }
             const { data } = await github.rest.repos.getBranch({ owner, repo, branch: 'main' });
             core.setOutput('sha', data.commit.sha);
-            core.notice(`NIRA_CLIENT_MAIN_SHA=${data.commit.sha}`);
+            core.notice(`NIRA_SELF_MAIN_SHA=${data.commit.sha}`);
 
       - name: Validate lease and fence inputs
         shell: bash
@@ -88,7 +96,7 @@ jobs:
           test "$ISSUE_NUMBER" -gt 0
           test "$CONTROL_ISSUE_NUMBER" -gt 0
 
-      - name: Dispatch NIRA real cross-repository worker
+      - name: Dispatch NIRA real self-worker
         uses: actions/github-script@v7
         env:
           CLIENT_REPOSITORY: ${{ inputs.repository }}
@@ -116,10 +124,10 @@ jobs:
                 fence_token: process.env.FENCE_TOKEN
               }
             });
-            core.notice('NIRA_L10_WORKER_DISPATCH=REQUESTED');
-            core.notice(`NIRA_CLIENT_MAIN_SHA=${process.env.EXPECTED_MAIN_SHA}`);
+            core.notice('NIRA_L10_SELF_WORKER_DISPATCH=REQUESTED');
+            core.notice(`NIRA_SELF_MAIN_SHA=${process.env.EXPECTED_MAIN_SHA}`);
 
-      - name: Record activation evidence
+      - name: Record self-proof activation evidence
         if: always()
         shell: bash
         env:
@@ -135,6 +143,7 @@ jobs:
           mkdir -p nira-l10-evidence
           cat > nira-l10-evidence/activation.txt <<EOF
 NIRA_L10_ACTIVATION=REQUESTED
+NIRA_L10_PROOF_SCOPE=NIRA_SELF_ONLY
 NIRA_CLIENT_REPOSITORY=$CLIENT_REPOSITORY
 NIRA_CLIENT_ISSUE=$CLIENT_ISSUE
 NIRA_CONTROL_ISSUE=$CONTROL_ISSUE
@@ -149,6 +158,6 @@ EOF
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nira-l10-activation-${{ github.run_id }}
+          name: nira-l10-self-activation-${{ github.run_id }}
           path: nira-l10-evidence/activation.txt
           if-no-files-found: error
