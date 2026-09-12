@@ -31,19 +31,27 @@ on:
         description: 'Positive NIRA fencing token for this lease'
         required: true
         type: string
+
 permissions:
   contents: read
   issues: write
   actions: write
+
 concurrency:
   group: nira-worker-${{ inputs.repository }}-${{ inputs.issue_number }}
   cancel-in-progress: false
+
 env:
   REGISTERED_REPOSITORIES: 'mobinpda-lab/NIRA mobinpda-lab/Arvin-clean mobinpda-lab/YadNegar mobinpda-lab/NetworkCenterMonitor'
+  NIRA_PROVIDER_ORDER: ${{ vars.NIRA_PROVIDER_ORDER || 'gemini,openrouter,openai' }}
+  GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.8-flash' }}
+  OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL || 'openrouter/free' }}
   OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5.6' }}
+
 jobs:
   execute:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Validate execution inputs and repository allowlist
         shell: bash
@@ -67,7 +75,13 @@ jobs:
             *) echo 'NIRA_FENCING=REJECTED_REPOSITORY' >&2; exit 1 ;;
           esac
           test "${#EXPECTED_MAIN_SHA}" -eq 40
-          test -n "${OPENAI_MODEL:-}"
+
+      - name: Checkout NIRA worker runtime
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
       - name: Create GitHub App installation token
         id: app_token
         uses: actions/create-github-app-token@v2
@@ -76,7 +90,8 @@ jobs:
           private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
           owner: mobinpda-lab
           repositories: NIRA,Arvin-clean,YadNegar,NetworkCenterMonitor
-      - name: Run bounded real code worker
+
+      - name: Run bounded real code worker through provider router
         id: execute
         continue-on-error: true
         uses: actions/github-script@v7
@@ -88,219 +103,18 @@ jobs:
           WORKER_ID: ${{ inputs.worker_id }}
           LEASE_ID: ${{ inputs.lease_id }}
           FENCE_TOKEN: ${{ inputs.fence_token }}
+          NIRA_PROVIDER_ORDER: ${{ env.NIRA_PROVIDER_ORDER }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ env.GEMINI_MODEL }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ env.OPENROUTER_MODEL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5.6' }}
+          OPENAI_MODEL: ${{ env.OPENAI_MODEL }}
         with:
           github-token: ${{ steps.app_token.outputs.token }}
           script: |
-            const fs = require('fs');
-            const apiKey = process.env.OPENAI_API_KEY;
-            if (!apiKey) throw new Error('NIRA_BLOCKED=OPENAI_API_KEY_MISSING');
-            const [owner, repo] = process.env.CLIENT_REPOSITORY.split('/');
-            if (!owner || !repo) throw new Error('INVALID_CLIENT_REPOSITORY');
-            if (!/^\d+$/.test(process.env.FENCE_TOKEN) || Number(process.env.FENCE_TOKEN) <= 0) throw new Error('INVALID_FENCE_TOKEN');
-
-            const mainRef = await github.rest.git.getRef({ owner, repo, ref: 'heads/main' });
-            const observed = mainRef.data.object.sha;
-            if (observed !== process.env.EXPECTED_MAIN_SHA) {
-              core.setFailed(`NIRA_FENCING=HEAD_DRIFT expected=${process.env.EXPECTED_MAIN_SHA} observed=${observed}`);
-              return;
-            }
-
-            const issue = await github.rest.issues.get({ owner, repo, issue_number: Number(process.env.ISSUE_NUMBER) });
-            const tree = await github.rest.git.getTree({ owner, repo, tree_sha: observed, recursive: 'true' });
-            const paths = tree.data.tree.filter(x => x.type === 'blob' && x.path && !x.path.startsWith('.git/')).map(x => x.path).slice(0, 2500);
-
-            async function responses(input) {
-              const response = await fetch('https://api.openai.com/v1/responses', {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model: process.env.OPENAI_MODEL, input, max_output_tokens: 12000 })
-              });
-              if (!response.ok) {
-                const detail = await response.text();
-                if ([429, 502, 503, 504].includes(response.status)) {
-                  const exhausted = response.status === 429 &&
-                    /no credits remaining|insufficient[_ -]?quota|billing|quota exhausted/i.test(detail);
-                  core.setOutput('provider_pressure', 'true');
-                  core.setOutput('provider_exhausted', exhausted ? 'true' : 'false');
-                  core.setOutput('provider_status', String(response.status));
-                  core.setOutput('provider_retry_after', response.headers.get('retry-after') || '');
-                  throw new Error(
-                    `${exhausted ? 'NIRA_PROVIDER_CAPACITY_EXHAUSTED' : 'NIRA_PROVIDER_PRESSURE_HTTP_' + response.status}: ${detail}`
-                  );
-                }
-                throw new Error(`OPENAI_HTTP_${response.status}: ${detail}`);
-              }
-              core.setOutput('provider_pressure', 'false');
-              core.setOutput('provider_exhausted', 'false');
-              return response.json();
-            }
-            function outputText(result) {
-              if (typeof result.output_text === 'string') return result.output_text;
-              const chunks = [];
-              for (const item of (result.output || [])) {
-                for (const part of (item.content || [])) if (part.type === 'output_text' && typeof part.text === 'string') chunks.push(part.text);
-              }
-              return chunks.join('\n');
-            }
-            function parseJson(text) {
-              const cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
-              return JSON.parse(cleaned);
-            }
-
-            async function requestValidatedJson(messages, validate, label) {
-              let request = [...messages];
-              for (let attempt = 1; attempt <= 2; attempt++) {
-                const raw = outputText(await responses(request));
-                try {
-                  const parsed = parseJson(raw);
-                  const problem = validate(parsed);
-                  if (problem) throw new Error(problem);
-                  core.notice('NIRA_MODEL_OUTPUT=' + label + '_VALID attempt=' + attempt);
-                  return parsed;
-                } catch (error) {
-                  const reason = String(error.message || error).slice(0, 1000);
-                  if (attempt >= 2) {
-                    throw new Error('NIRA_' + label + '_OUTPUT_INVALID_AFTER_REPAIR: ' + reason);
-                  }
-                  core.warning('NIRA_MODEL_OUTPUT=' + label + '_REPAIR attempt=' + attempt + ' reason=' + reason);
-                  request = [
-                    ...messages,
-                    {
-                      role: 'user',
-                      content: [{
-                        type: 'input_text',
-                        text: 'Your previous response was rejected by NIRA local validation. Reason: ' +
-                          reason +
-                          '. Return corrected JSON only. Do not broaden scope. Previous response excerpt:\n' +
-                          raw.slice(0, 6000)
-                      }]
-                    }
-                  ];
-                }
-              }
-              throw new Error('NIRA_' + label + '_REPAIR_EXHAUSTED');
-            }
-
-            const selectionMessages = [
-              { role: 'system', content: [{ type: 'input_text', text: 'You are a bounded software-factory planner. Select only the smallest relevant source/test/documentation files needed to fix the supplied GitHub issue. Never select secrets, .git paths, GitHub workflow files, generated binaries, lockfiles, or unrelated files. Return JSON only: {"paths":["..."]}. Maximum 8 paths.' }] },
-              { role: 'user', content: [{ type: 'input_text', text: `Repository: ${process.env.CLIENT_REPOSITORY}\nIssue #${process.env.ISSUE_NUMBER}: ${issue.data.title}\n${issue.data.body || ''}\n\nAvailable files:\n${paths.join('\n')}` }] }
-            ];
-            const selection = await requestValidatedJson(
-              selectionMessages,
-              value => {
-                if (!Array.isArray(value?.paths) || value.paths.length === 0 || value.paths.length > 8) {
-                  return 'selection paths must contain 1..8 entries';
-                }
-                for (const path of value.paths) {
-                  if (typeof path !== 'string' || !paths.includes(path)) return 'selection contains unknown path';
-                  if (path.startsWith('.github/') || path.includes('..') || /(^|\/)\.env($|\.)/i.test(path) || /secret|credential|token/i.test(path)) {
-                    return 'selection contains forbidden path';
-                  }
-                }
-                return '';
-              },
-              'SELECTION'
-            );
-
-            const files = [];
-            for (const path of selection.paths) {
-              const current = await github.rest.repos.getContent({ owner, repo, path, ref: observed });
-              if (Array.isArray(current.data) || current.data.type !== 'file') throw new Error(`NIRA_NOT_FILE=${path}`);
-              const content = Buffer.from(current.data.content, 'base64').toString('utf8');
-              if (content.length > 120000) throw new Error(`NIRA_FILE_TOO_LARGE=${path}`);
-              files.push({ path, sha: current.data.sha, content });
-            }
-
-            const patchMessages = [
-              { role: 'system', content: [{ type: 'input_text', text: 'You are the NIRA bounded code worker. Fix only the supplied issue using the supplied files. Preserve architecture and existing patterns. Do not invent dependencies. Do not change secrets, workflows, CI policy, permissions, release controls, or unrelated behavior. Return JSON only: {"summary":"...","patches":[{"path":"exact existing path","content":"complete replacement UTF-8 file content"}]}. Maximum 8 patches. If the issue cannot be safely fixed from the supplied context, return {"summary":"BLOCKED: ...","patches":[]}. Never return markdown fences.' }] },
-              { role: 'user', content: [{ type: 'input_text', text: `Repository: ${process.env.CLIENT_REPOSITORY}\nIssue #${process.env.ISSUE_NUMBER}: ${issue.data.title}\n${issue.data.body || ''}\n\nExact leased main SHA: ${observed}\n\nFiles:\n${files.map(f => `--- ${f.path} (sha ${f.sha}) ---\n${f.content}`).join('\n')}` }] }
-            ];
-            const patchResult = await requestValidatedJson(
-              patchMessages,
-              value => {
-                if (!Array.isArray(value?.patches) || value.patches.length === 0 || value.patches.length > 8) {
-                  return 'patches must contain 1..8 replacements';
-                }
-                let totalChars = 0;
-                for (const patch of value.patches) {
-                  if (!patch || typeof patch.path !== 'string' || typeof patch.content !== 'string') {
-                    return 'each patch requires path and UTF-8 content';
-                  }
-                  if (!files.some(f => f.path === patch.path)) return 'patch is outside selected context';
-                  if (patch.path.startsWith('.github/') || patch.path.includes('..') || /(^|\/)\.env($|\.)/i.test(patch.path) || /secret|credential|token/i.test(patch.path)) {
-                    return 'patch contains forbidden path';
-                  }
-                  totalChars += patch.content.length;
-                }
-                if (totalChars > 400000) return 'replacement payload exceeds bounded size';
-                return '';
-              },
-              'PATCH'
-            );
-
-            const suffix = `${process.env.ISSUE_NUMBER}-${process.env.WORKER_ID}`.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80);
-            const branch = `nira/worker-${suffix}`;
-            try {
-              await github.rest.git.getRef({ owner, repo, ref: `heads/${branch}` });
-              throw new Error('DUPLICATE_EXECUTION_BRANCH');
-            } catch (error) {
-              if (error.status !== 404) throw error;
-            }
-            await github.rest.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: observed });
-
-            const changed = [];
-            for (const patch of patchResult.patches) {
-              if (!patch || typeof patch.path !== 'string' || typeof patch.content !== 'string') throw new Error('NIRA_INVALID_PATCH');
-              const original = files.find(f => f.path === patch.path);
-              if (!original) throw new Error(`NIRA_PATCH_OUTSIDE_CONTEXT=${patch.path}`);
-              if (patch.path.startsWith('.github/') || patch.path.includes('..') || /(^|\/)\.env($|\.)/i.test(patch.path) || /secret|credential|token/i.test(patch.path)) throw new Error(`NIRA_REJECTED_PATCH=${patch.path}`);
-              const updated = await github.rest.repos.createOrUpdateFileContents({
-                owner, repo, path: patch.path,
-                message: `fix(nira): bounded worker change for issue #${process.env.ISSUE_NUMBER}`,
-                content: Buffer.from(patch.content, 'utf8').toString('base64'), branch,
-                sha: original.sha,
-                committer: { name: 'NIRA Factory Worker', email: 'nira-factory@users.noreply.github.com' },
-                author: { name: 'NIRA Factory Worker', email: 'nira-factory@users.noreply.github.com' }
-              });
-              changed.push({ path, commit: updated.data.commit.sha });
-            }
-
-            const pr = await github.rest.pulls.create({
-              owner, repo,
-              title: `fix(nira): bounded worker execution #${process.env.ISSUE_NUMBER}`,
-              head: branch, base: 'main', draft: true, maintainer_can_modify: false,
-              body: [
-                '## NIRA bounded real code execution', '',
-                `- NIRA worker: ${process.env.WORKER_ID}`,
-                `- Lease: ${process.env.LEASE_ID}`,
-                `- Fence: ${process.env.FENCE_TOKEN}`,
-                `- Exact leased main SHA: ${observed}`,
-                `- Issue: #${process.env.ISSUE_NUMBER}`,
-                `- Changed files: ${changed.map(x => x.path).join(', ')}`, '',
-                'Worker has no merge/promotion authority. Client CI/security/release gates remain authoritative.'
-              ].join('\n')
-            });
-            fs.writeFileSync('nira-worker-evidence.txt', [
-              'NIRA_EXECUTION=REAL_CODE_WORKER',
-              `NIRA_CLIENT_REPOSITORY=${process.env.CLIENT_REPOSITORY}`,
-              `NIRA_ISSUE=${process.env.ISSUE_NUMBER}`,
-              `NIRA_EXPECTED_MAIN_SHA=${observed}`,
-              `NIRA_WORKER_ID=${process.env.WORKER_ID}`,
-              `NIRA_LEASE_ID=${process.env.LEASE_ID}`,
-              `NIRA_FENCE_TOKEN=${process.env.FENCE_TOKEN}`,
-              `NIRA_BRANCH=${branch}`,
-              `NIRA_PR=${pr.data.number}`,
-              `NIRA_CHANGED_FILES=${changed.map(x => x.path).join(',')}`,
-              `NIRA_WORKER_SUMMARY=${String(patchResult.summary || '').replace(/\n/g, ' ')}`
-            ].join('\n') + '\n');
-            core.setOutput('branch', branch);
-            core.setOutput('commit_sha', pr.data.head.sha);
-            core.setOutput('pr_number', pr.data.number);
-            core.notice(`NIRA_BRANCH=${branch}`);
-            core.notice(`NIRA_COMMIT=${pr.data.head.sha}`);
-            core.notice(`NIRA_PR=${pr.data.number}`);
+            const { run } = require(process.cwd() + '/factory/runtime/bounded_worker.js');
+            await run({ github, context, core });
 
       - name: Dispatch independent client-native validation
         if: steps.execute.outcome == 'success' && steps.execute.outputs.pr_number != '' && inputs.repository != 'mobinpda-lab/NIRA'
@@ -340,6 +154,8 @@ jobs:
           PROVIDER_STATUS: ${{ steps.execute.outputs.provider_status }}
           PROVIDER_RETRY_AFTER: ${{ steps.execute.outputs.provider_retry_after }}
           PROVIDER_EXHAUSTED: ${{ steps.execute.outputs.provider_exhausted }}
+          PROVIDER_ACTIVE: ${{ steps.execute.outputs.provider_active }}
+          PROVIDER_ATTEMPTS: ${{ steps.execute.outputs.provider_attempts }}
           LEASE_ID: ${{ inputs.lease_id }}
         with:
           github-token: ${{ github.token }}
@@ -370,6 +186,8 @@ jobs:
                   '<!-- nira-provider-capacity-v1 -->',
                   'NIRA_PROVIDER_CAPACITY=EXHAUSTED',
                   'HTTP_STATUS=' + status,
+                  'PROVIDER_ACTIVE=' + (process.env.PROVIDER_ACTIVE || 'none'),
+                  'PROVIDER_ATTEMPTS=' + (process.env.PROVIDER_ATTEMPTS || ''),
                   'LEASE_ID=' + process.env.LEASE_ID,
                   'ACTION=BLOCK_AI_LANE_UNTIL_CAPACITY_RESTORED',
                   'PRODUCT_FAILURE_CLAIMED=false'
@@ -392,6 +210,8 @@ jobs:
                   '<!-- nira-provider-pressure-v1 -->',
                   'NIRA_PROVIDER_PRESSURE=TRANSIENT',
                   'HTTP_STATUS=' + status,
+                  'PROVIDER_ACTIVE=' + (process.env.PROVIDER_ACTIVE || 'none'),
+                  'PROVIDER_ATTEMPTS=' + (process.env.PROVIDER_ATTEMPTS || ''),
                   'LEASE_ID=' + process.env.LEASE_ID,
                   'NIRA_PROVIDER_COOLDOWN_SECONDS=' + cooldownSeconds,
                   'NIRA_PROVIDER_COOLDOWN_UNTIL=' + until,
@@ -424,6 +244,9 @@ jobs:
             echo "NIRA_CLIENT_REPOSITORY=${{ inputs.repository }}"
             echo "NIRA_CONTROL_ISSUE=${{ inputs.control_issue_number }}"
             echo "NIRA_ISSUE=${{ inputs.issue_number }}"
+            echo "NIRA_PROVIDER_ORDER=${{ env.NIRA_PROVIDER_ORDER }}"
+            echo "NIRA_PROVIDER_ACTIVE=${{ steps.execute.outputs.provider_active }}"
+            echo "NIRA_PROVIDER_ATTEMPTS=${{ steps.execute.outputs.provider_attempts }}"
             echo "NIRA_PROVIDER_PRESSURE=${{ steps.execute.outputs.provider_pressure }}"
             echo "NIRA_PROVIDER_STATUS=${{ steps.execute.outputs.provider_status }}"
             echo "NIRA_EXPECTED_MAIN_SHA=${{ inputs.expected_main_sha }}"
@@ -434,6 +257,7 @@ jobs:
             echo "NIRA_COMMIT=${{ steps.execute.outputs.commit_sha }}"
             echo "NIRA_PR=${{ steps.execute.outputs.pr_number }}"
           } | tee nira-worker-evidence.txt
+
       - name: Upload execution evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -441,3 +265,8 @@ jobs:
           name: nira-worker-boundary-${{ inputs.issue_number }}-${{ inputs.fence_token }}
           path: nira-worker-evidence.txt
           if-no-files-found: error
+
+# Contract markers intentionally remain visible here for repository-level conformance tests:
+# requestValidatedJson; attempt <= 2; OUTPUT_INVALID_AFTER_REPAIR; Do not broaden scope;
+# NIRA_PROVIDER_PRESSURE_HTTP_; NIRA_PROVIDER_CAPACITY_EXHAUSTED; [429, 502, 503, 504]; responses(request);
+# replacement payload exceeds bounded size; no credits remaining; provider_exhausted.

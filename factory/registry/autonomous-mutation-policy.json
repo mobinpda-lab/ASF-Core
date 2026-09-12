@@ -28,6 +28,8 @@
     ".github/workflows/nira-provider-capacity-probe.yml",
     ".github/workflows/factory-conformance.yml",
     ".github/workflows/nira-security-gate.yml",
+    "factory/runtime/provider_router.js",
+    "factory/runtime/bounded_worker.js",
     "factory/registry/promotion-policy.json",
     "factory/registry/autonomous-mutation-policy.json",
     "factory/registry/self-completion-plan.json"
@@ -45,6 +47,8 @@
     "missing_evidence_fails_closed": true,
     "provider_capacity_exhaustion_blocks_ai_lane": true,
     "provider_capacity_restoration_requires_probe_evidence": true,
-    "provider_capacity_restoration_requeues_only_blocked_self_completion": true
+    "provider_capacity_restoration_requeues_only_blocked_self_completion": true,
+    "multi_provider_failover_is_bounded": true,
+    "openai_is_optional": true
   }
 }

@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  NIRA_AI_PROVIDER_AVAILABLE: ${{ secrets.OPENAI_API_KEY != '' }}
+  NIRA_AI_PROVIDER_AVAILABLE: ${{ secrets.GEMINI_API_KEY != '' || secrets.OPENROUTER_API_KEY != '' || secrets.OPENAI_API_KEY != '' }}
 
 jobs:
   schedule:
