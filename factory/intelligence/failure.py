@@ -84,9 +84,9 @@ def classify_failure(text: str, *, changed_files: tuple[str, ...] = (), repeated
     if matched is FailureClass.ENVIRONMENT:
         return FailureDecision(matched, "MEDIUM", False, "ENVIRONMENT_RECOVERY", True, "environment failures should not spend AI repair budget")
     if matched is FailureClass.DEPENDENCY:
-        return FailureDecision(matched, "MEDIUM", not unsafe_scope, "BOUNDED_REPAIR" if not unsafe_scope else "ESCALATE", True, "dependency repair allowed only outside protected control surfaces")
+        return FailureDecision(matched, "MEDIUM", not unsafe_scope, "BOUNDED_REPAIR" if not unsafe_scope else "ESCALATE", not unsafe_scope, "dependency repair allowed only outside protected control surfaces")
     if matched in {FailureClass.CODE, FailureClass.TEST_REGRESSION}:
-        return FailureDecision(matched, "MEDIUM", not unsafe_scope, "BOUNDED_REPAIR" if not unsafe_scope else "ESCALATE", True, "source/test failures may enter bounded repair")
+        return FailureDecision(matched, "MEDIUM", not unsafe_scope, "BOUNDED_REPAIR" if not unsafe_scope else "ESCALATE", not unsafe_scope, "source/test failures may enter bounded repair")
     if matched is FailureClass.FLAKY:
         return FailureDecision(matched, "LOW" if not repeated else "MEDIUM", False, "REVALIDATE", True, "flaky evidence should be revalidated before code repair")
     return FailureDecision(FailureClass.UNKNOWN, "NONE", False, "ESCALATE", False, "unknown failure fails closed")
