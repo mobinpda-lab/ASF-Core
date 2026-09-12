@@ -122,3 +122,32 @@ class NIRAControlPlane:
         """Return authorization only; NIRA promotion authority executes elsewhere."""
         evidence = self._evidence[evidence_id]
         return evidence.observation_state.value == "VERIFIED" and evidence.confidence != "NONE"
+
+    def health_snapshot(self, now: datetime | None = None) -> dict[str, object]:
+        """Deterministic health snapshot derived from GitHub-authoritative evidence.
+
+        Reports explicit HEALTHY / DEGRADED / BLOCKED states. GitHub remains the
+        authoritative source for live execution state; this snapshot only
+        reflects in-process lease, gate, and evidence state owned by NIRA.
+        """
+        now = now or datetime.now(timezone.utc)
+        active_leases = [l for l in self._leases.values() if l.active(now)]
+        expired_leases = [l for l in self._leases.values() if not l.active(now)]
+        verified_evidence = [
+            e for e in self._evidence.values()
+            if e.observation_state.value == "VERIFIED" and e.confidence != "NONE"
+        ]
+        if expired_leases:
+            state = "BLOCKED"
+        elif active_leases and not verified_evidence:
+            state = "DEGRADED"
+        else:
+            state = "HEALTHY"
+        return {
+            "state": state,
+            "active_leases": len(active_leases),
+            "expired_leases": len(expired_leases),
+            "verified_evidence": len(verified_evidence),
+            "queued_tasks": len(self.queue._items),
+            "timestamp": now.isoformat(),
+        }
