@@ -108,7 +108,7 @@ def collect_pr_evidence(
 
     evidence_id = sha256(
         f"{repo}:{project_id}:{task_id}:{pr_number}:{expected_head_sha}:{run_id}:{state.value}".encode()
-    ).hexdigest()[:20]
+    ).hexdigest()
 
     evidence = Evidence(
         evidence_id=evidence_id,
