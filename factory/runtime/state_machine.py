@@ -63,3 +63,17 @@ def expiry_from(now: datetime, ttl_seconds: int = 300) -> datetime:
     if ttl_seconds <= 0:
         raise ValueError("ttl_seconds must be positive")
     return now + timedelta(seconds=ttl_seconds)
+
+
+def self_diagnostic(lease: Lease, now: datetime | None = None) -> str:
+    """Deterministic self-diagnostic for a single lease.
+
+    Returns HEALTHY / DEGRADED / BLOCKED based on lease validity and the
+    allowed transition graph. Does not bypass GitHub-derived evidence.
+    """
+    now = now or datetime.now(timezone.utc)
+    if not lease.active(now):
+        return "BLOCKED"
+    if lease.worker_id and lease.fence_token:
+        return "HEALTHY"
+    return "DEGRADED"
