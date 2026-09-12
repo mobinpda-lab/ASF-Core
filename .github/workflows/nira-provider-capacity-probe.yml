@@ -1,6 +1,8 @@
 name: NIRA Provider Capacity Probe
 
 on:
+  issues:
+    types: [labeled]
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
@@ -98,7 +100,13 @@ jobs:
 
             for (const { issue, comments } of candidates) {
               const marker = '<!-- nira-provider-capacity-restored-v1 -->';
-              if (!comments.some(comment => String(comment.body || '').includes(marker))) {
+              const latestRestored = comments
+                .filter(comment => String(comment.body || '').includes(marker))
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+              const currentExhausted = comments
+                .filter(comment => String(comment.body || '').includes('NIRA_PROVIDER_CAPACITY=EXHAUSTED'))
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+              if (!latestRestored || new Date(latestRestored.created_at) < new Date(currentExhausted.created_at)) {
                 await github.rest.issues.createComment({
                   owner, repo, issue_number: issue.number,
                   body: [
