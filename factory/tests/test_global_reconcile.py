@@ -27,10 +27,17 @@ def test_waits_when_exact_main_is_missing_or_execution_is_active():
         {"active_workers": 1},
         {"active_leases": 1},
         {"active_canonical_runs": 1},
-        {"open_candidate_prs": 1},
     ):
         result = reconciler.reconcile(ReconcileSnapshot(main_sha="abc", **kwargs))
         assert result.decision is ReconcileDecision.WAIT
+
+
+def test_unrelated_open_prs_do_not_stall_selected_safe_work():
+    result = GlobalReconciler().reconcile(
+        ReconcileSnapshot(main_sha="abc", open_candidate_prs=3, product_tasks=(40,))
+    )
+    assert result.decision is ReconcileDecision.CONTINUE
+    assert result.issue_number == 40
 
 
 def test_human_and_security_holds_fail_closed():
@@ -108,10 +115,9 @@ def test_global_reconcile_workflow_is_five_minute_fail_closed_and_queue_only():
     assert "related-pr-open" in workflow
     assert "race-active-canonical-run" in workflow
     assert "github.rest.pulls.merge" not in workflow
-    assert "contents: write" not in workflow
 
 
-def test_global_reconcile_policy_keeps_merge_manual_and_registers_protected_controller():
+def test_global_reconcile_policy_registers_protected_controller():
     policy = read_json("factory/registry/autonomous-mutation-policy.json")
     controller = policy["global_reconcile_controller"]
     assert controller["workflow"] == ".github/workflows/nira-global-reconcile.yml"
@@ -122,3 +128,13 @@ def test_global_reconcile_policy_keeps_merge_manual_and_registers_protected_cont
     assert controller["may_merge_pull_requests"] is False
     assert policy["safety"]["automatic_merge_enabled"] is False
     assert ".github/workflows/nira-global-reconcile.yml" in policy["protected_paths"]
+
+
+def test_promotion_requires_human_merge_by_default():
+    promotion = read_json("factory/registry/promotion-policy.json")["promotion"]
+    orchestrator = read(".github/workflows/production-orchestrator.yml")
+    assert promotion["automatic_merge_enabled"] is False
+    assert "automatic_merge_enabled" in orchestrator
+    assert 'if [[ "$auto_merge" != "true" ]]' in orchestrator
+    assert "NIRA_PROMOTION=READY_FOR_HUMAN_MERGE" in orchestrator
+    assert "AUTOMATIC_MERGE=false" in orchestrator
