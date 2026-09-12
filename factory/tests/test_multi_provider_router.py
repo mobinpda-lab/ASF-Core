@@ -47,8 +47,6 @@ def test_router_retries_transport_failure_on_same_provider_with_hard_bound():
     assert "NIRA_PROVIDER_RETRY" in router
     assert "retryableSameProviderFailure" in router
     assert "status === 0 || [502, 503, 504].includes(status)" in router
-    # A 429 is intentionally not retried on the same provider; the existing
-    # cooldown/failover authority handles provider pressure without storms.
     retry_function = router.split("function retryableSameProviderFailure", 1)[1].split("function delay", 1)[0]
     assert "429" not in retry_function
 
@@ -77,12 +75,33 @@ def test_capacity_probe_uses_same_router_and_can_restore_from_any_provider():
     assert "PROVIDER=' + probe.provider" in probe
 
 
-def test_self_completion_worker_enforces_exact_scope_before_model_selection():
+def test_self_completion_worker_enforces_exact_scope_and_small_local_edits():
     runtime = read("factory/runtime/bounded_worker.js")
     assert "extractExactScope" in runtime
     assert "NIRA_SELF_COMPLETION_TASK: true" in runtime
     assert "selection contains unknown or out-of-scope path" in runtime
-    assert "changed.push({ path: patch.path" in runtime
+    assert '"edits"' in runtime
+    assert "simulateEdits" in runtime
+    assert "old substring must match exactly once" in runtime
+    assert "maximum 16 edits" in runtime
+    assert "changed.push({ path: replacement.path" in runtime
+    assert "NIRA_EDIT_OPERATIONS" in runtime
+
+
+def test_worker_tolerates_explanatory_text_but_still_parses_one_balanced_json_object():
+    runtime = read("factory/runtime/bounded_worker.js")
+    assert "firstBalancedJsonObject" in runtime
+    assert "return JSON.parse(extracted)" in runtime
+    assert "if (!extracted) throw firstError" in runtime
+    assert "requestValidatedJson" in runtime
+    assert "Do not broaden scope" in runtime
+
+
+def test_worker_reduces_free_router_output_budget_for_selection_and_edits():
+    runtime = read("factory/runtime/bounded_worker.js")
+    assert "'SELECTION',\n    2000" in runtime
+    assert "'PATCH',\n    6000" in runtime
+    assert "replacement payload exceeds bounded size" in runtime
 
 
 def test_multi_provider_runtime_is_protected_factory_authority():

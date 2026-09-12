@@ -3,9 +3,47 @@
 const fs = require('fs');
 const { routedResponse } = require('./provider_router');
 
+function firstBalancedJsonObject(text) {
+  const source = String(text || '');
+  const start = source.indexOf('{');
+  if (start < 0) return '';
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < source.length; index++) {
+    const char = source[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  return '';
+}
+
 function parseJson(text) {
   const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
-  return JSON.parse(cleaned);
+  try {
+    return JSON.parse(cleaned);
+  } catch (firstError) {
+    const extracted = firstBalancedJsonObject(cleaned);
+    if (!extracted) throw firstError;
+    return JSON.parse(extracted);
+  }
 }
 
 function extractExactScope(body, availablePaths) {
@@ -20,6 +58,45 @@ function extractExactScope(body, availablePaths) {
   if (!requested.length) return availablePaths;
   const allowed = new Set(requested);
   return availablePaths.filter(path => allowed.has(path));
+}
+
+function countOccurrences(haystack, needle) {
+  if (!needle) return 0;
+  let count = 0;
+  let offset = 0;
+  while (offset <= haystack.length) {
+    const index = haystack.indexOf(needle, offset);
+    if (index < 0) break;
+    count += 1;
+    offset = index + Math.max(needle.length, 1);
+  }
+  return count;
+}
+
+function simulateEdits(edits, files) {
+  const original = new Map(files.map(file => [file.path, file.content]));
+  const working = new Map(original);
+  for (let index = 0; index < edits.length; index++) {
+    const edit = edits[index];
+    const current = working.get(edit.path);
+    if (typeof current !== 'string') {
+      return { problem: `edit ${index + 1} targets unknown path`, working, original };
+    }
+    const occurrences = countOccurrences(current, edit.old);
+    if (occurrences !== 1) {
+      return {
+        problem: `edit ${index + 1} old substring must match exactly once; observed=${occurrences}`,
+        working,
+        original
+      };
+    }
+    const updated = current.replace(edit.old, edit.new);
+    if (updated.length > 180000) {
+      return { problem: `edit ${index + 1} makes file exceed bounded size`, working, original };
+    }
+    working.set(edit.path, updated);
+  }
+  return { problem: '', working, original };
 }
 
 async function run({ github, context, core }) {
@@ -46,13 +123,13 @@ async function run({ github, context, core }) {
   const paths = extractExactScope(issue.data.body, allPaths);
   if (!paths.length) throw new Error('NIRA_BLOCKED=NO_ALLOWED_SOURCE_PATHS');
 
-  async function requestValidatedJson(messages, validate, label) {
+  async function requestValidatedJson(messages, validate, label, maxOutputTokens) {
     let request = [...messages];
     for (let attempt = 1; attempt <= 2; attempt++) {
       const result = await routedResponse(request, {
         env,
         core,
-        maxOutputTokens: 12000,
+        maxOutputTokens,
         expectJson: true
       });
       const raw = result.output_text;
@@ -116,7 +193,8 @@ async function run({ github, context, core }) {
       }
       return '';
     },
-    'SELECTION'
+    'SELECTION',
+    2000
   );
 
   const files = [];
@@ -128,12 +206,12 @@ async function run({ github, context, core }) {
     files.push({ path, sha: current.data.sha, content });
   }
 
-  const patchMessages = [
+  const editMessages = [
     {
       role: 'system',
       content: [{
         type: 'input_text',
-        text: 'You are the NIRA bounded code worker. Fix only the supplied issue using the supplied files. Preserve architecture and existing patterns. Do not invent dependencies. Do not change secrets, workflows, CI policy, permissions, release controls, or unrelated behavior. Return JSON only: {"summary":"...","patches":[{"path":"exact existing path","content":"complete replacement UTF-8 file content"}]}. Maximum 8 patches. If the issue cannot be safely fixed from the supplied context, return {"summary":"BLOCKED: ...","patches":[]}. Never return markdown fences.'
+        text: 'You are the NIRA bounded code worker. Fix only the supplied issue using the supplied files. Preserve architecture and existing patterns. Do not invent dependencies. Do not change secrets, workflows, CI policy, permissions, release controls, or unrelated behavior. Return JSON only: {"summary":"...","edits":[{"path":"exact existing path","old":"exact existing UTF-8 substring that occurs once","new":"replacement UTF-8 substring"}]}. Use the smallest edits possible, maximum 16 edits across maximum 8 files. The old substring must be copied exactly from supplied content and uniquely identify the edit location. If the issue cannot be safely fixed from the supplied context, return {"summary":"BLOCKED: ...","edits":[]}. Never return markdown fences.'
       }]
     },
     {
@@ -144,35 +222,52 @@ async function run({ github, context, core }) {
       }]
     }
   ];
-  const patchResult = await requestValidatedJson(
-    patchMessages,
+  const editResult = await requestValidatedJson(
+    editMessages,
     value => {
-      if (!Array.isArray(value?.patches) || value.patches.length > 8) {
-        return 'patches must contain 0..8 replacements';
+      if (!Array.isArray(value?.edits) || value.edits.length > 16) {
+        return 'edits must contain 0..16 replacements';
       }
-      if (value.patches.length === 0 && !String(value?.summary || '').startsWith('BLOCKED:')) {
-        return 'zero patches requires a BLOCKED summary';
+      if (value.edits.length === 0 && !String(value?.summary || '').startsWith('BLOCKED:')) {
+        return 'zero edits requires a BLOCKED summary';
       }
+      const distinctPaths = new Set();
       let totalChars = 0;
-      for (const patch of value.patches) {
-        if (!patch || typeof patch.path !== 'string' || typeof patch.content !== 'string') {
-          return 'each patch requires path and UTF-8 content';
+      for (const edit of value.edits) {
+        if (!edit || typeof edit.path !== 'string' || typeof edit.old !== 'string' || typeof edit.new !== 'string') {
+          return 'each edit requires path, old, and new UTF-8 strings';
         }
-        if (!files.some(file => file.path === patch.path)) return 'patch is outside selected context';
-        if (patch.path.startsWith('.github/') || patch.path.includes('..') || /(^|\/)\.env($|\.)/i.test(patch.path) || /secret|credential|token/i.test(patch.path)) {
-          return 'patch contains forbidden path';
+        if (!edit.old || edit.old === edit.new) return 'each edit must replace a non-empty old substring with different content';
+        if (!files.some(file => file.path === edit.path)) return 'edit is outside selected context';
+        if (edit.path.startsWith('.github/') || edit.path.includes('..') || /(^|\/)\.env($|\.)/i.test(edit.path) || /secret|credential|token/i.test(edit.path)) {
+          return 'edit contains forbidden path';
         }
-        totalChars += patch.content.length;
+        distinctPaths.add(edit.path);
+        totalChars += edit.old.length + edit.new.length;
       }
-      if (totalChars > 400000) return 'replacement payload exceeds bounded size';
-      return '';
+      if (distinctPaths.size > 8) return 'edits exceed changed-file bound';
+      if (totalChars > 120000) return 'replacement payload exceeds bounded size';
+      return simulateEdits(value.edits, files).problem;
     },
-    'PATCH'
+    'PATCH',
+    6000
   );
 
-  if (patchResult.patches.length === 0) {
-    throw new Error(`NIRA_WORKER_BLOCKED_SAFE: ${String(patchResult.summary || '').slice(0, 1000)}`);
+  if (editResult.edits.length === 0) {
+    throw new Error(`NIRA_WORKER_BLOCKED_SAFE: ${String(editResult.summary || '').slice(0, 1000)}`);
   }
+
+  const simulation = simulateEdits(editResult.edits, files);
+  if (simulation.problem) throw new Error(`NIRA_EDIT_SIMULATION_INVALID: ${simulation.problem}`);
+  const replacements = files
+    .map(file => ({
+      path: file.path,
+      sha: file.sha,
+      original: file.content,
+      content: simulation.working.get(file.path)
+    }))
+    .filter(file => file.content !== file.original);
+  if (!replacements.length || replacements.length > 8) throw new Error('NIRA_EDIT_RESULT_CHANGED_FILE_BOUND');
 
   const suffix = `${env.ISSUE_NUMBER}-${env.WORKER_ID}`.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80);
   const branch = `nira/worker-${suffix}`;
@@ -185,21 +280,19 @@ async function run({ github, context, core }) {
   await github.rest.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: observed });
 
   const changed = [];
-  for (const patch of patchResult.patches) {
-    const original = files.find(file => file.path === patch.path);
-    if (!original) throw new Error(`NIRA_PATCH_OUTSIDE_CONTEXT=${patch.path}`);
+  for (const replacement of replacements) {
     const updated = await github.rest.repos.createOrUpdateFileContents({
       owner,
       repo,
-      path: patch.path,
+      path: replacement.path,
       message: `fix(nira): bounded worker change for issue #${env.ISSUE_NUMBER}`,
-      content: Buffer.from(patch.content, 'utf8').toString('base64'),
+      content: Buffer.from(replacement.content, 'utf8').toString('base64'),
       branch,
-      sha: original.sha,
+      sha: replacement.sha,
       committer: { name: 'NIRA Factory Worker', email: 'nira-factory@users.noreply.github.com' },
       author: { name: 'NIRA Factory Worker', email: 'nira-factory@users.noreply.github.com' }
     });
-    changed.push({ path: patch.path, commit: updated.data.commit.sha });
+    changed.push({ path: replacement.path, commit: updated.data.commit.sha });
   }
 
   const pr = await github.rest.pulls.create({
@@ -218,7 +311,8 @@ async function run({ github, context, core }) {
       `- Fence: ${env.FENCE_TOKEN}`,
       `- Exact leased main SHA: ${observed}`,
       `- Issue: #${env.ISSUE_NUMBER}`,
-      `- Provider: ${process.env.NIRA_PROVIDER_ORDER || 'gemini,openrouter,openai'}`,
+      `- Provider order: ${process.env.NIRA_PROVIDER_ORDER || 'gemini,openrouter,openai'}`,
+      `- Edit operations: ${editResult.edits.length}`,
       `- Changed files: ${changed.map(item => item.path).join(', ')}`,
       '',
       'Worker has no merge/promotion authority. Client CI/security/release gates remain authoritative.'
@@ -235,8 +329,9 @@ async function run({ github, context, core }) {
     `NIRA_FENCE_TOKEN=${env.FENCE_TOKEN}`,
     `NIRA_BRANCH=${branch}`,
     `NIRA_PR=${pr.data.number}`,
+    `NIRA_EDIT_OPERATIONS=${editResult.edits.length}`,
     `NIRA_CHANGED_FILES=${changed.map(item => item.path).join(',')}`,
-    `NIRA_WORKER_SUMMARY=${String(patchResult.summary || '').replace(/\n/g, ' ')}`
+    `NIRA_WORKER_SUMMARY=${String(editResult.summary || '').replace(/\n/g, ' ')}`
   ].join('\n') + '\n');
 
   core.setOutput('branch', branch);
@@ -247,4 +342,11 @@ async function run({ github, context, core }) {
   core.notice(`NIRA_PR=${pr.data.number}`);
 }
 
-module.exports = { extractExactScope, parseJson, run };
+module.exports = {
+  countOccurrences,
+  extractExactScope,
+  firstBalancedJsonObject,
+  parseJson,
+  simulateEdits,
+  run
+};
