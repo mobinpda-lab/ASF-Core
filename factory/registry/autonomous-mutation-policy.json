@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "authority": "NIRA canonical GitHub issue queue + lease + worker + promotion",
+  "direct_main_writes_allowed": false,
+  "autonomous_controller": {
+    "workflow": ".github/workflows/nira-autonomous-self-completion.yml",
+    "cadence": "*/5 * * * *",
+    "may_create_issues": true,
+    "may_queue_issues": true,
+    "may_authorize_pr_scope": true,
+    "may_close_completed_tasks": true,
+    "may_write_repository_contents": false,
+    "may_merge_pull_requests": false
+  },
+  "mutation_boundary": {
+    "mode": "PR_ONLY",
+    "required_branch_prefix": "nira/",
+    "required_promotion_label": "nira-authorized",
+    "scope_must_match_task_allowlist": true,
+    "max_changed_files_per_task": 8,
+    "max_scope_retries": 2
+  },
+  "protected_paths": [
+    ".github/workflows/production-orchestrator.yml",
+    ".github/workflows/nira-queue-scheduler.yml",
+    ".github/workflows/nira-lease.yml",
+    ".github/workflows/nira-cross-repo-worker.yml",
+    ".github/workflows/factory-conformance.yml",
+    ".github/workflows/nira-security-gate.yml",
+    "factory/registry/promotion-policy.json",
+    "factory/registry/autonomous-mutation-policy.json",
+    "factory/registry/self-completion-plan.json"
+  ],
+  "required_exact_main_workflows": [
+    "NIRA CI",
+    "NIRA Factory E2E",
+    "NIRA Factory Conformance",
+    "NIRA Security Gate"
+  ],
+  "safety": {
+    "retry_is_bounded": true,
+    "duplicate_execution_is_forbidden": true,
+    "unsafe_scope_fails_closed": true,
+    "missing_evidence_fails_closed": true,
+    "provider_capacity_exhaustion_blocks_ai_lane": true
+  }
+}
