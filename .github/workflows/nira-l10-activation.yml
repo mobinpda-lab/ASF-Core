@@ -1,0 +1,154 @@
+name: NIRA L10 Activation
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: 'Registered client repository (owner/name)'
+        required: true
+        type: string
+        default: mobinpda-lab/Arvin-clean
+      issue_number:
+        description: 'Client proof issue number'
+        required: true
+        type: string
+        default: '863'
+      control_issue_number:
+        description: 'NIRA control-plane issue number'
+        required: true
+        type: string
+        default: '171'
+      worker_id:
+        description: 'NIRA worker identity'
+        required: true
+        type: string
+      lease_id:
+        description: 'Real NIRA lease identifier'
+        required: true
+        type: string
+      fence_token:
+        description: 'Positive NIRA fencing token'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+concurrency:
+  group: nira-l10-${{ inputs.repository }}-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve exact client main HEAD
+        id: client_head
+        uses: actions/github-script@v7
+        env:
+          CLIENT_REPOSITORY: ${{ inputs.repository }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const [owner, repo] = process.env.CLIENT_REPOSITORY.split('/');
+            if (!owner || !repo || process.env.CLIENT_REPOSITORY.split('/').length !== 2) {
+              core.setFailed('NIRA_L10=REJECTED_INVALID_REPOSITORY');
+              return;
+            }
+            const allowed = new Set([
+              'mobinpda-lab/NIRA',
+              'mobinpda-lab/Arvin-clean',
+              'mobinpda-lab/YadNegar',
+              'mobinpda-lab/NetworkCenterMonitor'
+            ]);
+            if (!allowed.has(process.env.CLIENT_REPOSITORY)) {
+              core.setFailed('NIRA_L10=REJECTED_UNREGISTERED_CLIENT');
+              return;
+            }
+            const { data } = await github.rest.repos.getBranch({ owner, repo, branch: 'main' });
+            core.setOutput('sha', data.commit.sha);
+            core.notice(`NIRA_CLIENT_MAIN_SHA=${data.commit.sha}`);
+
+      - name: Validate lease and fence inputs
+        shell: bash
+        env:
+          LEASE_ID: ${{ inputs.lease_id }}
+          FENCE_TOKEN: ${{ inputs.fence_token }}
+          WORKER_ID: ${{ inputs.worker_id }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}
+        run: |
+          set -euo pipefail
+          test -n "$LEASE_ID"
+          test -n "$WORKER_ID"
+          test "$FENCE_TOKEN" -gt 0
+          test "$ISSUE_NUMBER" -gt 0
+          test "$CONTROL_ISSUE_NUMBER" -gt 0
+
+      - name: Dispatch NIRA real cross-repository worker
+        uses: actions/github-script@v7
+        env:
+          CLIENT_REPOSITORY: ${{ inputs.repository }}
+          CLIENT_ISSUE: ${{ inputs.issue_number }}
+          CONTROL_ISSUE: ${{ inputs.control_issue_number }}
+          EXPECTED_MAIN_SHA: ${{ steps.client_head.outputs.sha }}
+          WORKER_ID: ${{ inputs.worker_id }}
+          LEASE_ID: ${{ inputs.lease_id }}
+          FENCE_TOKEN: ${{ inputs.fence_token }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'nira-cross-repo-worker.yml',
+              ref: 'main',
+              inputs: {
+                repository: process.env.CLIENT_REPOSITORY,
+                control_issue_number: process.env.CONTROL_ISSUE,
+                issue_number: process.env.CLIENT_ISSUE,
+                expected_main_sha: process.env.EXPECTED_MAIN_SHA,
+                worker_id: process.env.WORKER_ID,
+                lease_id: process.env.LEASE_ID,
+                fence_token: process.env.FENCE_TOKEN
+              }
+            });
+            core.notice('NIRA_L10_WORKER_DISPATCH=REQUESTED');
+            core.notice(`NIRA_CLIENT_MAIN_SHA=${process.env.EXPECTED_MAIN_SHA}`);
+
+      - name: Record activation evidence
+        if: always()
+        shell: bash
+        env:
+          CLIENT_REPOSITORY: ${{ inputs.repository }}
+          CLIENT_ISSUE: ${{ inputs.issue_number }}
+          CONTROL_ISSUE: ${{ inputs.control_issue_number }}
+          EXPECTED_MAIN_SHA: ${{ steps.client_head.outputs.sha }}
+          WORKER_ID: ${{ inputs.worker_id }}
+          LEASE_ID: ${{ inputs.lease_id }}
+          FENCE_TOKEN: ${{ inputs.fence_token }}
+        run: |
+          set -euo pipefail
+          mkdir -p nira-l10-evidence
+          cat > nira-l10-evidence/activation.txt <<EOF
+NIRA_L10_ACTIVATION=REQUESTED
+NIRA_CLIENT_REPOSITORY=$CLIENT_REPOSITORY
+NIRA_CLIENT_ISSUE=$CLIENT_ISSUE
+NIRA_CONTROL_ISSUE=$CONTROL_ISSUE
+NIRA_CLIENT_MAIN_SHA=$EXPECTED_MAIN_SHA
+NIRA_WORKER_ID=$WORKER_ID
+NIRA_LEASE_ID=$LEASE_ID
+NIRA_FENCE_TOKEN=$FENCE_TOKEN
+NIRA_MAIN_HEAD=${GITHUB_SHA}
+EOF
+
+      - name: Upload activation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nira-l10-activation-${{ github.run_id }}
+          path: nira-l10-evidence/activation.txt
+          if-no-files-found: error
