@@ -25,6 +25,7 @@
     ".github/workflows/nira-queue-scheduler.yml",
     ".github/workflows/nira-lease.yml",
     ".github/workflows/nira-cross-repo-worker.yml",
+    ".github/workflows/nira-provider-capacity-probe.yml",
     ".github/workflows/factory-conformance.yml",
     ".github/workflows/nira-security-gate.yml",
     "factory/registry/promotion-policy.json",
@@ -42,6 +43,8 @@
     "duplicate_execution_is_forbidden": true,
     "unsafe_scope_fails_closed": true,
     "missing_evidence_fails_closed": true,
-    "provider_capacity_exhaustion_blocks_ai_lane": true
+    "provider_capacity_exhaustion_blocks_ai_lane": true,
+    "provider_capacity_restoration_requires_probe_evidence": true,
+    "provider_capacity_restoration_requeues_only_blocked_self_completion": true
   }
 }
