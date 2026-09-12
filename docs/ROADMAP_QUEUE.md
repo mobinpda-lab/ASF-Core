@@ -37,6 +37,12 @@
 | #128 | [AUTO-FIX] NIRA Factory Conformance failed at 4c47cba2a391 | P4 | QUEUED | factory:queued, factory:ready |
 | #129 | [AUTO-FIX] NIRA Factory Conformance failed at 7f09e9432e8d | P4 | QUEUED | factory:queued, factory:ready |
 | #134 | [AUTO-FIX] NIRA Factory Conformance failed at 1b213b6a799f | P4 | QUEUED | factory:queued, factory:ready |
+| #138 | [AUTO-FIX] NIRA Factory Conformance failed at 2e3b77695eec | P4 | QUEUED | factory:queued, factory:ready |
+| #143 | [AUTO-FIX] NIRA Factory Conformance failed at b9ab05b8fb66 | P4 | QUEUED | factory:queued, factory:ready |
+| #147 | [AUTO-FIX] NIRA Factory Conformance failed at 3f9b428e40e5 | P4 | QUEUED | factory:queued, factory:ready |
+| #150 | [AUTO-FIX] NIRA Factory Conformance failed at 1b0d14d038f5 | P4 | QUEUED | factory:queued, factory:ready |
+| #152 | [AUTO-FIX] NIRA Factory Conformance failed at 12a58a3772cb | P4 | QUEUED | factory:queued, factory:ready |
+| #154 | [AUTO-FIX] NIRA Factory Conformance failed at 60e824760fcc | P4 | QUEUED | factory:queued, factory:ready |
 
 ## Queue Contract
 
