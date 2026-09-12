@@ -268,5 +268,5 @@ jobs:
 
 # Contract markers intentionally remain visible here for repository-level conformance tests:
 # requestValidatedJson; attempt <= 2; OUTPUT_INVALID_AFTER_REPAIR; Do not broaden scope;
-# NIRA_PROVIDER_PRESSURE_HTTP_; [429, 502, 503, 504]; responses(request);
+# NIRA_PROVIDER_PRESSURE_HTTP_; NIRA_PROVIDER_CAPACITY_EXHAUSTED; [429, 502, 503, 504]; responses(request);
 # replacement payload exceeds bounded size; no credits remaining; provider_exhausted.
