@@ -19,8 +19,8 @@ def test_provider_pressure_uses_cooldown_not_repair_budget():
 def test_code_failure_can_repair_only_outside_protected_surface():
     safe = classify_failure("SyntaxError compile failed", changed_files=("factory/foo.py",))
     protected = classify_failure("SyntaxError compile failed", changed_files=(".github/workflows/ci.yml",))
-    assert safe.category is FailureClass.CODE and safe.auto_repair is True
-    assert protected.auto_repair is False and protected.owner_lane == "ESCALATE"
+    assert safe.category is FailureClass.CODE and safe.auto_repair is True and safe.retryable is True
+    assert protected.auto_repair is False and protected.owner_lane == "ESCALATE" and protected.retryable is False
 
 
 def test_unknown_failure_fails_closed():
