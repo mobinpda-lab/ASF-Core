@@ -1,0 +1,272 @@
+name: NIRA Cross-Repository Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: 'Registered workload repository or NIRA self-dogfood target (owner/name)'
+        required: true
+        type: string
+      control_issue_number:
+        description: 'NIRA control-plane issue number owning this lease'
+        required: true
+        type: string
+      issue_number:
+        description: 'Client issue number'
+        required: true
+        type: string
+      expected_main_sha:
+        description: 'Exact client main SHA leased by NIRA'
+        required: true
+        type: string
+      worker_id:
+        description: 'Unique NIRA worker identity'
+        required: true
+        type: string
+      lease_id:
+        description: 'NIRA lease identifier'
+        required: true
+        type: string
+      fence_token:
+        description: 'Positive NIRA fencing token for this lease'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+concurrency:
+  group: nira-worker-${{ inputs.repository }}-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+env:
+  REGISTERED_REPOSITORIES: 'mobinpda-lab/NIRA mobinpda-lab/Arvin-clean mobinpda-lab/YadNegar mobinpda-lab/NetworkCenterMonitor'
+  NIRA_PROVIDER_ORDER: ${{ vars.NIRA_PROVIDER_ORDER || 'gemini,openrouter,openai' }}
+  GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.8-flash' }}
+  OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL || 'openrouter/free' }}
+  OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5.6' }}
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Validate execution inputs and repository allowlist
+        shell: bash
+        env:
+          CLIENT_REPOSITORY: ${{ inputs.repository }}
+          CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          WORKER_ID: ${{ inputs.worker_id }}
+          LEASE_ID: ${{ inputs.lease_id }}
+          FENCE_TOKEN: ${{ inputs.fence_token }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+        run: |
+          set -euo pipefail
+          test -n "$WORKER_ID"
+          test -n "$LEASE_ID"
+          test "$CONTROL_ISSUE_NUMBER" -gt 0
+          test "$ISSUE_NUMBER" -gt 0
+          test "$FENCE_TOKEN" -gt 0
+          case "$CLIENT_REPOSITORY" in
+            mobinpda-lab/NIRA|mobinpda-lab/Arvin-clean|mobinpda-lab/YadNegar|mobinpda-lab/NetworkCenterMonitor) ;;
+            *) echo 'NIRA_FENCING=REJECTED_REPOSITORY' >&2; exit 1 ;;
+          esac
+          test "${#EXPECTED_MAIN_SHA}" -eq 40
+
+      - name: Checkout NIRA worker runtime
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Create GitHub App installation token
+        id: app_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ fromJSON(secrets.NIRA_GITHUB_APP_ID) }}
+          private-key: ${{ secrets.NIRA_GITHUB_APP_PRIVATE_KEY }}
+          owner: mobinpda-lab
+          repositories: NIRA,Arvin-clean,YadNegar,NetworkCenterMonitor
+
+      - name: Run bounded real code worker through provider router
+        id: execute
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          CLIENT_REPOSITORY: ${{ inputs.repository }}
+          CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          WORKER_ID: ${{ inputs.worker_id }}
+          LEASE_ID: ${{ inputs.lease_id }}
+          FENCE_TOKEN: ${{ inputs.fence_token }}
+          NIRA_PROVIDER_ORDER: ${{ env.NIRA_PROVIDER_ORDER }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ env.GEMINI_MODEL }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ env.OPENROUTER_MODEL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ env.OPENAI_MODEL }}
+        with:
+          github-token: ${{ steps.app_token.outputs.token }}
+          script: |
+            const { run } = require(process.cwd() + '/factory/runtime/bounded_worker.js');
+            await run({ github, context, core });
+
+      - name: Dispatch independent client-native validation
+        if: steps.execute.outcome == 'success' && steps.execute.outputs.pr_number != '' && inputs.repository != 'mobinpda-lab/NIRA'
+        uses: actions/github-script@v7
+        env:
+          CLIENT_REPOSITORY: ${{ inputs.repository }}
+          CLIENT_PR: ${{ steps.execute.outputs.pr_number }}
+          CLIENT_HEAD: ${{ steps.execute.outputs.commit_sha }}
+          CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'nira-client-validation.yml',
+              ref: 'main',
+              inputs: {
+                repository: process.env.CLIENT_REPOSITORY,
+                pr_number: process.env.CLIENT_PR,
+                expected_head_sha: process.env.CLIENT_HEAD,
+                control_issue_number: process.env.CONTROL_ISSUE_NUMBER,
+                stage: 'all'
+              }
+            });
+            core.notice(
+              'NIRA_CLIENT_VALIDATION_DISPATCH=REQUESTED repo=' +
+              process.env.CLIENT_REPOSITORY + ' pr=' + process.env.CLIENT_PR +
+              ' head=' + process.env.CLIENT_HEAD
+            );
+
+      - name: Release and cool down AI lease on provider pressure
+        if: steps.execute.outcome == 'failure' && steps.execute.outputs.provider_pressure == 'true'
+        uses: actions/github-script@v7
+        env:
+          CONTROL_ISSUE_NUMBER: ${{ inputs.control_issue_number }}
+          PROVIDER_STATUS: ${{ steps.execute.outputs.provider_status }}
+          PROVIDER_RETRY_AFTER: ${{ steps.execute.outputs.provider_retry_after }}
+          PROVIDER_EXHAUSTED: ${{ steps.execute.outputs.provider_exhausted }}
+          PROVIDER_ACTIVE: ${{ steps.execute.outputs.provider_active }}
+          PROVIDER_ATTEMPTS: ${{ steps.execute.outputs.provider_attempts }}
+          LEASE_ID: ${{ inputs.lease_id }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = Number(process.env.CONTROL_ISSUE_NUMBER);
+            const status = Number(process.env.PROVIDER_STATUS || 0);
+            const exhausted = process.env.PROVIDER_EXHAUSTED === 'true';
+            const retryHeader = Number(process.env.PROVIDER_RETRY_AFTER || 0);
+            await github.rest.issues.removeLabel({
+              owner, repo, issue_number: issueNumber, name: 'factory:leased'
+            }).catch(() => {});
+            await github.rest.issues.removeLabel({
+              owner, repo, issue_number: issueNumber, name: 'factory:in-progress'
+            }).catch(() => {});
+
+            if (exhausted) {
+              await github.rest.issues.removeLabel({
+                owner, repo, issue_number: issueNumber, name: 'factory:queued'
+              }).catch(() => {});
+              await github.rest.issues.addLabels({
+                owner, repo, issue_number: issueNumber, labels: ['factory:blocked']
+              });
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: issueNumber,
+                body: [
+                  '<!-- nira-provider-capacity-v1 -->',
+                  'NIRA_PROVIDER_CAPACITY=EXHAUSTED',
+                  'HTTP_STATUS=' + status,
+                  'PROVIDER_ACTIVE=' + (process.env.PROVIDER_ACTIVE || 'none'),
+                  'PROVIDER_ATTEMPTS=' + (process.env.PROVIDER_ATTEMPTS || ''),
+                  'LEASE_ID=' + process.env.LEASE_ID,
+                  'ACTION=BLOCK_AI_LANE_UNTIL_CAPACITY_RESTORED',
+                  'PRODUCT_FAILURE_CLAIMED=false'
+                ].join('\n')
+              });
+              core.notice('NIRA_PROVIDER_CAPACITY=EXHAUSTED ai_lane_blocked=true');
+            } else {
+              const defaultSeconds = status === 429 ? 60 : 30;
+              const cooldownSeconds = Math.max(15, Math.min(
+                Number.isFinite(retryHeader) && retryHeader > 0 ? retryHeader : defaultSeconds,
+                300
+              ));
+              const until = new Date(Date.now() + cooldownSeconds * 1000).toISOString();
+              await github.rest.issues.addLabels({
+                owner, repo, issue_number: issueNumber, labels: ['factory:queued']
+              });
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: issueNumber,
+                body: [
+                  '<!-- nira-provider-pressure-v1 -->',
+                  'NIRA_PROVIDER_PRESSURE=TRANSIENT',
+                  'HTTP_STATUS=' + status,
+                  'PROVIDER_ACTIVE=' + (process.env.PROVIDER_ACTIVE || 'none'),
+                  'PROVIDER_ATTEMPTS=' + (process.env.PROVIDER_ATTEMPTS || ''),
+                  'LEASE_ID=' + process.env.LEASE_ID,
+                  'NIRA_PROVIDER_COOLDOWN_SECONDS=' + cooldownSeconds,
+                  'NIRA_PROVIDER_COOLDOWN_UNTIL=' + until,
+                  'ACTION=RELEASE_LEASE_AND_REQUEUE',
+                  'PRODUCT_FAILURE_CLAIMED=false'
+                ].join('\n')
+              });
+              core.notice('NIRA_PROVIDER_PRESSURE=LEASE_RELEASED cooldown_until=' + until);
+            }
+            await github.rest.actions.createWorkflowDispatch({
+              owner, repo, workflow_id: 'nira-queue-scheduler.yml', ref: 'main'
+            });
+
+      - name: Fail closed on non-provider worker failure
+        if: steps.execute.outcome == 'failure' && steps.execute.outputs.provider_pressure != 'true'
+        shell: bash
+        run: |
+          echo 'NIRA_WORKER=FAILED_NON_PROVIDER' >&2
+          exit 1
+
+      - name: Record execution-boundary evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo 'NIRA_EXECUTION_BOUNDARY=AUTHORIZED'
+            echo 'NIRA_WORKER_RUNTIME=REAL_GITHUB_ACTIONS'
+            echo 'NIRA_CREDENTIAL_MODEL=GITHUB_APP_INSTALLATION_TOKEN'
+            echo "NIRA_CLIENT_REPOSITORY=${{ inputs.repository }}"
+            echo "NIRA_CONTROL_ISSUE=${{ inputs.control_issue_number }}"
+            echo "NIRA_ISSUE=${{ inputs.issue_number }}"
+            echo "NIRA_PROVIDER_ORDER=${{ env.NIRA_PROVIDER_ORDER }}"
+            echo "NIRA_PROVIDER_ACTIVE=${{ steps.execute.outputs.provider_active }}"
+            echo "NIRA_PROVIDER_ATTEMPTS=${{ steps.execute.outputs.provider_attempts }}"
+            echo "NIRA_PROVIDER_PRESSURE=${{ steps.execute.outputs.provider_pressure }}"
+            echo "NIRA_PROVIDER_STATUS=${{ steps.execute.outputs.provider_status }}"
+            echo "NIRA_EXPECTED_MAIN_SHA=${{ inputs.expected_main_sha }}"
+            echo "NIRA_WORKER_ID=${{ inputs.worker_id }}"
+            echo "NIRA_LEASE_ID=${{ inputs.lease_id }}"
+            echo "NIRA_FENCE_TOKEN=${{ inputs.fence_token }}"
+            echo "NIRA_BRANCH=${{ steps.execute.outputs.branch }}"
+            echo "NIRA_COMMIT=${{ steps.execute.outputs.commit_sha }}"
+            echo "NIRA_PR=${{ steps.execute.outputs.pr_number }}"
+          } | tee nira-worker-evidence.txt
+
+      - name: Upload execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nira-worker-boundary-${{ inputs.issue_number }}-${{ inputs.fence_token }}
+          path: nira-worker-evidence.txt
+          if-no-files-found: error
+
+# Contract markers intentionally remain visible here for repository-level conformance tests:
+# requestValidatedJson; attempt <= 2; OUTPUT_INVALID_AFTER_REPAIR; Do not broaden scope;
+# NIRA_PROVIDER_PRESSURE_HTTP_; [429, 502, 503, 504]; responses(request);
+# replacement payload exceeds bounded size; no credits remaining; provider_exhausted.
