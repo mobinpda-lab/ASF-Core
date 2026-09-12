@@ -17,8 +17,11 @@ class RecoveryPolicy:
             raise ValueError("lease TTL must exceed heartbeat interval")
 
     def decision(self, attempt: int, retryable: bool) -> str:
+        # If we have exceeded the maximum attempts, escalate.
         if attempt >= self.max_attempts:
             return "ESCALATE"
-        if retryable:
-            return "REQUEUE"
-        return "ESCALATE"
+        # If the failure is not retryable, escalate immediately to avoid retry loops.
+        if not retryable:
+            return "ESCALATE"
+        # Otherwise, requeue for another attempt.
+        return "REQUEUE"
