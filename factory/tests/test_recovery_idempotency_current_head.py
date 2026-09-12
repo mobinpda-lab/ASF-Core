@@ -87,3 +87,29 @@ def test_expired_authorization_is_rejected_from_leased_state():
             lease.fence_token,
             now=lease.expires_at + timedelta(microseconds=1),
         )
+
+
+def test_health_snapshot_reflects_control_plane_state():
+    control = NIRAControlPlane(ArvinClientAdapter())
+    now = datetime.now(timezone.utc)
+    task = _task()
+    control.intake(task)
+    lease = control.lease(task, "worker-1", now=now)
+
+    snapshot = control.health_snapshot(now=now)
+    assert snapshot["state"] == "DEGRADED"
+    assert snapshot["active_leases"] == 1
+    assert snapshot["queued_tasks"] == 1
+
+
+def test_self_diagnostic_reflects_lease_state_at_current_head():
+    from factory.runtime.state_machine import self_diagnostic
+
+    control = NIRAControlPlane(ArvinClientAdapter())
+    now = datetime.now(timezone.utc)
+    task = _task()
+    control.intake(task)
+    lease = control.lease(task, "worker-1", now=now)
+
+    assert self_diagnostic(lease, now=now) == "HEALTHY"
+    assert self_diagnostic(lease, now=lease.expires_at) == "BLOCKED"
