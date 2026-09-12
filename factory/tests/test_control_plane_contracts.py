@@ -51,3 +51,33 @@ def test_recovery_is_bounded():
     assert policy.decision(2, True) == "REQUEUE"
     assert policy.decision(3, True) == "ESCALATE"
     assert policy.decision(1, False) == "ESCALATE"
+
+
+def test_self_diagnostic_reports_blocked_for_expired_lease():
+    from factory.runtime.state_machine import self_diagnostic
+
+    now = datetime.now(timezone.utc)
+    lease = Lease("l1", "t1", "w1", 7, now, now)
+    assert self_diagnostic(lease, now=now) == "BLOCKED"
+
+
+def test_self_diagnostic_reports_healthy_for_active_lease():
+    from factory.runtime.state_machine import self_diagnostic
+
+    now = datetime.now(timezone.utc)
+    lease = Lease("l1", "t1", "w1", 7, now, expiry_from(now))
+    assert self_diagnostic(lease, now=now) == "HEALTHY"
+
+
+def test_health_snapshot_is_deterministic_and_github_authoritative():
+    from factory.nira_control_plane import NIRAControlPlane
+    from factory.adapters.arvin import ArvinClientAdapter
+
+    control = NIRAControlPlane(ArvinClientAdapter())
+    snapshot = control.health_snapshot()
+    assert snapshot["state"] in ("HEALTHY", "DEGRADED", "BLOCKED")
+    assert snapshot["queued_tasks"] == 0
+    assert snapshot["active_leases"] == 0
+    assert snapshot["expired_leases"] == 0
+    assert snapshot["verified_evidence"] == 0
+    assert "timestamp" in snapshot
