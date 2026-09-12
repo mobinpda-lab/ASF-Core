@@ -1,0 +1,129 @@
+{
+  "schema_version": "1.0",
+  "repository": "mobinpda-lab/NIRA",
+  "parent_issues": [157, 158],
+  "required_workflows": [
+    "NIRA CI",
+    "NIRA Factory E2E",
+    "NIRA Factory Conformance",
+    "NIRA Security Gate"
+  ],
+  "max_scope_retry": 2,
+  "tasks": [
+    {
+      "id": "SC-01",
+      "title": "NIRA self diagnostics and health snapshot",
+      "priority_label": "priority:core",
+      "depends_on": [],
+      "execution_mode": "AI_BOUNDED",
+      "allowed_paths": [
+        "factory/nira_control_plane.py",
+        "factory/runtime/state_machine.py",
+        "factory/tests/test_control_plane_contracts.py",
+        "factory/tests/test_recovery_idempotency_current_head.py"
+      ],
+      "objective": "Complete deterministic self-diagnostic and health-state behavior using the existing NIRA control-plane and state-machine architecture. Report explicit healthy/degraded/blocked states without inventing a second source of truth or bypassing GitHub-derived evidence.",
+      "acceptance": [
+        "Self-diagnostic behavior is deterministic and test-covered.",
+        "GitHub remains authoritative for live execution state.",
+        "No workflow, secret, permission, promotion, or client-product logic is changed."
+      ]
+    },
+    {
+      "id": "SC-02",
+      "title": "NIRA reconstructible evidence chain",
+      "priority_label": "priority:core",
+      "depends_on": [],
+      "execution_mode": "AI_BOUNDED",
+      "allowed_paths": [
+        "factory/evidence/github_collector.py",
+        "factory/contracts/schema.py",
+        "factory/tests/test_github_evidence_collector.py",
+        "factory/tests/test_control_plane_contracts.py"
+      ],
+      "objective": "Harden NIRA evidence collection so task, worker, commit, validation, recovery and final decision evidence can be reconstructed consistently from GitHub-owned state.",
+      "acceptance": [
+        "Evidence records identify exact repository/head/task ownership.",
+        "Missing or inconsistent evidence fails closed.",
+        "Collector behavior is covered by local contract tests."
+      ]
+    },
+    {
+      "id": "SC-03",
+      "title": "NIRA bounded recovery decision hardening",
+      "priority_label": "priority:core",
+      "depends_on": [],
+      "execution_mode": "AI_BOUNDED",
+      "allowed_paths": [
+        "factory/recovery/policy.py",
+        "factory/intelligence/failure.py",
+        "factory/feedback/failure_feedback.py",
+        "factory/tests/test_failure_intelligence.py",
+        "factory/tests/test_failure_feedback.py",
+        "factory/tests/test_provider_pressure.py"
+      ],
+      "objective": "Strengthen bounded recovery classification and retry decisions so transient, deterministic, unsafe and exhausted-provider failures are handled distinctly with finite retry budgets and fail-closed escalation.",
+      "acceptance": [
+        "Retry decisions are bounded and deterministic.",
+        "Unsafe scope and exhausted capacity never enter blind retry loops.",
+        "Recovery classification remains test-covered."
+      ]
+    },
+    {
+      "id": "SC-04",
+      "title": "NIRA self readiness and completion gate",
+      "priority_label": "priority:automation",
+      "depends_on": ["SC-01", "SC-02", "SC-03"],
+      "execution_mode": "AI_BOUNDED",
+      "allowed_paths": [
+        "factory/gates/engine.py",
+        "factory/runtime/worker_contract.py",
+        "factory/tests/test_worker_contract.py",
+        "factory/tests/test_control_plane_contracts.py",
+        "factory/tests/test_registered_client_e2e.py"
+      ],
+      "objective": "Implement a fail-closed readiness decision that distinguishes implemented, proven, partially proven and blocked factory capabilities while preserving existing promotion and client boundaries.",
+      "acceptance": [
+        "Readiness requires evidence rather than documentation claims.",
+        "Blocked or partially proven capabilities cannot be reported as ready.",
+        "Gate behavior is contract-tested."
+      ]
+    },
+    {
+      "id": "SC-05",
+      "title": "NIRA adaptive autonomy and capacity confidence",
+      "priority_label": "priority:automation",
+      "depends_on": ["SC-03"],
+      "execution_mode": "AI_BOUNDED",
+      "allowed_paths": [
+        "factory/scheduling/adaptive.py",
+        "factory/scheduling/policy.py",
+        "factory/tests/test_adaptive_capacity.py",
+        "factory/tests/test_scheduler_policy.py"
+      ],
+      "objective": "Harden adaptive execution capacity so NIRA can increase throughput only when success evidence is strong and can reduce or stop capacity on repeated failures or provider pressure.",
+      "acceptance": [
+        "Capacity decisions remain bounded and deterministic.",
+        "Quality degradation reduces concurrency before additional work is leased.",
+        "Adaptive policy is fully test-covered."
+      ]
+    },
+    {
+      "id": "SC-06",
+      "title": "NIRA v1 completion certification record",
+      "priority_label": "priority:release-blocker",
+      "depends_on": ["SC-01", "SC-02", "SC-03", "SC-04", "SC-05"],
+      "execution_mode": "DETERMINISTIC_DOC_APPEND",
+      "allowed_paths": [
+        "docs/NIRA_COMPLETION_GOVERNANCE.md"
+      ],
+      "deterministic_path": "docs/NIRA_COMPLETION_GOVERNANCE.md",
+      "objective": "Append the final NIRA v1 autonomous-completion certification rule after all implementation tasks are proven on main.",
+      "acceptance": [
+        "Certification is appended only after all prerequisite self-completion tasks have merged.",
+        "The record states that exact-main CI, E2E, conformance and security evidence remains authoritative."
+      ],
+      "deterministic_payload": "## NIRA v1 autonomous completion certification\nNIRA may be reported as self-completion ready only when the machine-managed self-completion plan is complete, all prerequisite task PRs were promoted through the canonical NIRA promotion authority, and NIRA CI, NIRA Factory E2E, NIRA Factory Conformance, and NIRA Security Gate all have successful evidence on the exact current main SHA. The five-minute autonomous controller may create, queue, authorize, reconcile and close only bounded self-completion work; it has no direct-main write authority."
+    }
+  ]
+}
