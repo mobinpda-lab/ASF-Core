@@ -1,0 +1,376 @@
+name: NIRA Autonomous Self Completion
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: nira-autonomous-self-completion
+  cancel-in-progress: false
+
+jobs:
+  converge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Reconcile self-completion plan into canonical factory queue
+        id: converge
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const planPath = 'factory/registry/self-completion-plan.json';
+            const policyPath = 'factory/registry/autonomous-mutation-policy.json';
+
+            async function readJson(path) {
+              const response = await github.rest.repos.getContent({ owner, repo, path, ref: 'main' });
+              if (Array.isArray(response.data) || response.data.type !== 'file') {
+                throw new Error('NIRA_AUTONOMY_INVALID_JSON_RESOURCE=' + path);
+              }
+              return JSON.parse(Buffer.from(response.data.content, 'base64').toString('utf8'));
+            }
+
+            const plan = await readJson(planPath);
+            const policy = await readJson(policyPath);
+            if (plan.repository !== owner + '/' + repo) throw new Error('NIRA_AUTONOMY_REPOSITORY_MISMATCH');
+            if (policy.direct_main_writes_allowed !== false) throw new Error('NIRA_AUTONOMY_POLICY_MUST_FAIL_CLOSED');
+
+            const labelDefs = {
+              'factory:ready': ['0e8a16', 'Ready for NIRA factory intake'],
+              'factory:queued': ['1d76db', 'Queued by NIRA factory'],
+              'factory:leased': ['5319e7', 'Leased to a NIRA worker'],
+              'factory:in-progress': ['fbca04', 'NIRA worker execution in progress'],
+              'factory:completed': ['0e8a16', 'Completed with verified promotion evidence'],
+              'factory:blocked': ['b60205', 'Blocked pending bounded recovery'],
+              'factory:escalated': ['d93f0b', 'Escalated after bounded autonomous attempts'],
+              'priority:core': ['b60205', 'Core factory priority'],
+              'priority:automation': ['fbca04', 'Automation priority'],
+              'priority:release-blocker': ['d93f0b', 'Release-blocking priority'],
+              'nira-authorized': ['0e8a16', 'Authorized for canonical NIRA promotion gates'],
+              'do-not-merge': ['b60205', 'Blocked by NIRA safety policy']
+            };
+            async function ensureLabel(name) {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                const [color, description] = labelDefs[name];
+                await github.rest.issues.createLabel({ owner, repo, name, color, description });
+              }
+            }
+            for (const name of Object.keys(labelDefs)) await ensureLabel(name);
+
+            const labelsFor = issue => new Set((issue.labels || []).map(x => typeof x === 'string' ? x : x.name));
+            const markerFor = id => `<!-- nira-self-completion-task:${id} -->`;
+            const completionMarker = id => `<!-- nira-self-completion-complete:${id} -->`;
+            const authorizationMarker = (id, pr) => `<!-- nira-self-completion-authorized:${id}:pr-${pr} -->`;
+            const scopeFailureMarker = (id, pr) => `<!-- nira-self-completion-scope-failure:${id}:pr-${pr} -->`;
+
+            async function allIssues() {
+              const rows = await github.paginate(github.rest.issues.listForRepo, {
+                owner, repo, state: 'all', per_page: 100
+              });
+              return rows.filter(x => !x.pull_request);
+            }
+            async function comments(issueNumber) {
+              return github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: issueNumber, per_page: 100
+              });
+            }
+            async function removeLabel(issueNumber, name) {
+              await github.rest.issues.removeLabel({ owner, repo, issue_number: issueNumber, name }).catch(() => {});
+            }
+            async function clearExecutionLabels(issueNumber) {
+              for (const name of ['factory:ready','factory:queued','factory:leased','factory:in-progress','factory:blocked']) {
+                await removeLabel(issueNumber, name);
+              }
+            }
+
+            const mainRef = await github.rest.git.getRef({ owner, repo, ref: 'heads/main' });
+            const mainSha = mainRef.data.object.sha;
+            let issues = await allIssues();
+            const byTask = new Map();
+            for (const task of plan.tasks) {
+              const found = issues.find(i => String(i.body || '').includes(markerFor(task.id)));
+              if (found) byTask.set(task.id, found);
+            }
+
+            // Stage 1: create every missing self-completion task once. Dependencies
+            // decide when it becomes factory:ready; creation itself does not execute it.
+            for (const task of plan.tasks) {
+              if (byTask.has(task.id)) continue;
+              const lines = [
+                markerFor(task.id),
+                '# NIRA autonomous self-completion task ' + task.id,
+                '',
+                'NIRA_SELF_COMPLETION_TASK: true',
+                'NIRA_TASK_ID: ' + task.id,
+                'NIRA_EXECUTION_MODE: ' + (task.execution_mode === 'DETERMINISTIC_DOC_APPEND' ? 'deterministic-doc-append' : 'ai-bounded'),
+                'CLIENT_REPOSITORY: ' + plan.repository,
+                'CLIENT_ISSUE: PLACEHOLDER',
+                '',
+                '## Objective',
+                task.objective,
+                '',
+                '## Exact autonomous scope',
+                ...task.allowed_paths.map(path => '- ' + path),
+                '',
+                '## Acceptance',
+                ...task.acceptance.map(item => '- ' + item),
+                '',
+                'Do not modify files outside the exact autonomous scope. Do not change secrets, credentials, promotion authority, or unrelated client-product behavior.'
+              ];
+              if (task.execution_mode === 'DETERMINISTIC_DOC_APPEND') {
+                lines.push(
+                  '',
+                  'NIRA_DETERMINISTIC_PATH: ' + task.deterministic_path,
+                  '<!-- NIRA_DETERMINISTIC_APPEND_BEGIN -->',
+                  task.deterministic_payload,
+                  '<!-- NIRA_DETERMINISTIC_APPEND_END -->'
+                );
+              }
+              const created = await github.rest.issues.create({ owner, repo, title: `[NIRA SELF ${task.id}] ${task.title}`, body: lines.join('\n') });
+              const issueNumber = created.data.number;
+              const body = String(created.data.body || '').replace('CLIENT_ISSUE: PLACEHOLDER', 'CLIENT_ISSUE: ' + issueNumber);
+              const updated = await github.rest.issues.update({ owner, repo, issue_number: issueNumber, body });
+              byTask.set(task.id, updated.data);
+              core.notice('NIRA_SELF_TASK_CREATED=' + task.id + ' issue=' + issueNumber);
+            }
+
+            // Stage 2: reconcile merged worker PRs to durable task completion.
+            const closedPrs = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'closed', base: 'main', per_page: 100
+            });
+            for (const task of plan.tasks) {
+              const issue = byTask.get(task.id);
+              if (!issue) continue;
+              const labels = labelsFor(issue);
+              if (issue.state === 'closed' || labels.has('factory:completed')) continue;
+              const merged = closedPrs
+                .filter(pr => pr.merged_at && String(pr.head?.ref || '').startsWith(policy.mutation_boundary.required_branch_prefix))
+                .filter(pr => String(pr.body || '').includes('Issue: #' + issue.number))
+                .sort((a,b) => new Date(b.merged_at) - new Date(a.merged_at))[0];
+              if (!merged) continue;
+              const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: merged.number, per_page: 100 });
+              const changed = files.map(f => f.filename);
+              const allowed = new Set(task.allowed_paths);
+              const protectedSet = new Set(policy.protected_paths || []);
+              const invalid = changed.filter(path => !allowed.has(path) || protectedSet.has(path));
+              if (invalid.length || changed.length > policy.mutation_boundary.max_changed_files_per_task) {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: issue.number, labels: ['factory:escalated'] });
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: issue.number,
+                  body: completionMarker(task.id) + '\nNIRA_SELF_COMPLETION=MERGED_SCOPE_INVALID\nPR=' + merged.number + '\nINVALID=' + invalid.join(',')
+                });
+                continue;
+              }
+              await clearExecutionLabels(issue.number);
+              await github.rest.issues.addLabels({ owner, repo, issue_number: issue.number, labels: ['factory:completed'] });
+              const existingComments = await comments(issue.number);
+              if (!existingComments.some(c => String(c.body || '').includes(completionMarker(task.id)))) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: issue.number,
+                  body: [
+                    completionMarker(task.id),
+                    'NIRA_SELF_COMPLETION=VERIFIED_MERGED',
+                    'TASK_ID=' + task.id,
+                    'PR=' + merged.number,
+                    'MERGE_COMMIT=' + merged.merge_commit_sha,
+                    'CHANGED_FILES=' + changed.join(','),
+                    'PROMOTION_PATH=CANONICAL'
+                  ].join('\n')
+                });
+              }
+              await github.rest.issues.update({ owner, repo, issue_number: issue.number, state: 'closed', state_reason: 'completed' });
+              core.notice('NIRA_SELF_TASK_COMPLETED=' + task.id + ' pr=' + merged.number);
+            }
+
+            issues = await allIssues();
+            for (const task of plan.tasks) {
+              const fresh = issues.find(i => String(i.body || '').includes(markerFor(task.id)));
+              if (fresh) byTask.set(task.id, fresh);
+            }
+            const done = id => {
+              const issue = byTask.get(id);
+              return !!issue && (issue.state === 'closed' || labelsFor(issue).has('factory:completed'));
+            };
+
+            // Stage 3: guard every open worker PR. Scope authorization is separate
+            // from promotion; the canonical orchestrator still owns merge authority.
+            const openPrs = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', base: 'main', per_page: 100
+            });
+            for (const task of plan.tasks) {
+              const issue = byTask.get(task.id);
+              if (!issue || issue.state === 'closed') continue;
+              const taskPrs = openPrs.filter(pr =>
+                String(pr.head?.ref || '').startsWith(policy.mutation_boundary.required_branch_prefix) &&
+                String(pr.body || '').includes('Issue: #' + issue.number)
+              );
+              for (const pr of taskPrs) {
+                const prComments = await comments(pr.number);
+                const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: pr.number, per_page: 100 });
+                const changed = files.map(f => f.filename);
+                const allowed = new Set(task.allowed_paths);
+                const protectedSet = new Set(policy.protected_paths || []);
+                const invalid = changed.filter(path => !allowed.has(path) || protectedSet.has(path));
+                const tooLarge = changed.length === 0 || changed.length > policy.mutation_boundary.max_changed_files_per_task;
+
+                if (pr.base?.sha !== mainSha) {
+                  const marker = `<!-- nira-self-completion-main-drift:${task.id}:pr-${pr.number}:${mainSha} -->`;
+                  if (!prComments.some(c => String(c.body || '').includes(marker))) {
+                    await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: marker + '\nNIRA_SELF_COMPLETION=STALE_BASE_REQUEUE\nCURRENT_MAIN=' + mainSha + '\nPR_BASE=' + pr.base?.sha });
+                  }
+                  await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: 'closed' });
+                  await clearExecutionLabels(issue.number);
+                  await github.rest.issues.addLabels({ owner, repo, issue_number: issue.number, labels: ['factory:ready'] });
+                  core.notice('NIRA_SELF_PR_STALE_BASE_CLOSED=' + pr.number + ' task=' + task.id);
+                  continue;
+                }
+
+                if (invalid.length || tooLarge) {
+                  await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: ['do-not-merge'] });
+                  await removeLabel(pr.number, 'nira-authorized');
+                  const issueComments = await comments(issue.number);
+                  const pastFailures = issueComments.filter(c => String(c.body || '').includes('NIRA_SCOPE_RETRY=')).length;
+                  const attempt = pastFailures + 1;
+                  const marker = scopeFailureMarker(task.id, pr.number);
+                  if (!prComments.some(c => String(c.body || '').includes(marker))) {
+                    await github.rest.issues.createComment({
+                      owner, repo, issue_number: pr.number,
+                      body: marker + '\nNIRA_SELF_COMPLETION=SCOPE_REJECTED\nINVALID=' + invalid.join(',') + '\nCHANGED_COUNT=' + changed.length
+                    });
+                  }
+                  await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: 'closed' });
+                  await clearExecutionLabels(issue.number);
+                  if (attempt <= Number(plan.max_scope_retry || policy.mutation_boundary.max_scope_retries || 2)) {
+                    await github.rest.issues.addLabels({ owner, repo, issue_number: issue.number, labels: ['factory:ready'] });
+                    await github.rest.issues.createComment({ owner, repo, issue_number: issue.number, body: 'NIRA_SCOPE_RETRY=' + attempt + '\nREJECTED_PR=' + pr.number + '\nACTION=REQUEUE_BOUNDED' });
+                  } else {
+                    await github.rest.issues.addLabels({ owner, repo, issue_number: issue.number, labels: ['factory:escalated'] });
+                    await github.rest.issues.createComment({ owner, repo, issue_number: issue.number, body: 'NIRA_SCOPE_RETRY=' + attempt + '\nREJECTED_PR=' + pr.number + '\nACTION=ESCALATE_BUDGET_EXHAUSTED' });
+                  }
+                  core.warning('NIRA_SELF_PR_SCOPE_REJECTED=' + pr.number + ' task=' + task.id);
+                  continue;
+                }
+
+                const prLabelNames = new Set((pr.labels || []).map(x => typeof x === 'string' ? x : x.name));
+                if (!prLabelNames.has('nira-authorized')) {
+                  await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: ['nira-authorized'] });
+                }
+                if (!prComments.some(c => String(c.body || '').includes(authorizationMarker(task.id, pr.number)))) {
+                  await github.rest.issues.createComment({
+                    owner, repo, issue_number: pr.number,
+                    body: authorizationMarker(task.id, pr.number) + '\nNIRA_SELF_COMPLETION_SCOPE=AUTHORIZED\nTASK_ID=' + task.id + '\nEXACT_MAIN=' + mainSha + '\nCHANGED_FILES=' + changed.join(',') + '\nMERGE_AUTHORITY=NIRA Production Orchestrator'
+                  });
+                }
+              }
+            }
+
+            // Stage 4: move dependency-ready work into the existing canonical queue.
+            let activated = 0;
+            for (const task of plan.tasks) {
+              if (activated >= 2) break;
+              const issue = byTask.get(task.id);
+              if (!issue || done(task.id)) continue;
+              if (!task.depends_on.every(done)) continue;
+              const labels = labelsFor(issue);
+              if (labels.has('factory:queued') || labels.has('factory:leased') || labels.has('factory:in-progress') || labels.has('factory:escalated')) continue;
+              if (labels.has('factory:blocked')) continue;
+              await github.rest.issues.addLabels({ owner, repo, issue_number: issue.number, labels: ['factory:ready', task.priority_label] });
+              await github.rest.actions.createWorkflowDispatch({
+                owner, repo, workflow_id: 'nira-intake-queue.yml', ref: 'main', inputs: { issue_number: String(issue.number) }
+              });
+              activated += 1;
+              core.notice('NIRA_SELF_TASK_ACTIVATED=' + task.id + ' issue=' + issue.number);
+            }
+            if (activated > 0) {
+              await github.rest.actions.createWorkflowDispatch({ owner, repo, workflow_id: 'nira-queue-scheduler.yml', ref: 'main' });
+            }
+
+            // Stage 5: exact-main readiness gate. Documentation alone never certifies NIRA.
+            const allDone = plan.tasks.every(task => done(task.id));
+            const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+              owner, repo, branch: 'main', per_page: 100
+            });
+            const required = plan.required_workflows || policy.required_exact_main_workflows || [];
+            const workflowEvidence = {};
+            for (const name of required) {
+              const run = runs
+                .filter(r => r.name === name && r.head_sha === mainSha && r.status === 'completed')
+                .sort((a,b) => new Date(b.created_at) - new Date(a.created_at))[0];
+              workflowEvidence[name] = run ? { id: run.id, conclusion: run.conclusion, url: run.html_url } : null;
+            }
+            const exactMainGreen = required.every(name => workflowEvidence[name]?.conclusion === 'success');
+            const currentIssues = await allIssues();
+            const activeSelfWork = currentIssues.filter(i =>
+              plan.tasks.some(task => String(i.body || '').includes(markerFor(task.id))) &&
+              i.state === 'open' &&
+              ['factory:ready','factory:queued','factory:leased','factory:in-progress'].some(label => labelsFor(i).has(label))
+            ).length;
+            const certified = allDone && exactMainGreen && activeSelfWork === 0;
+
+            const status = {
+              schema_version: '1.0',
+              repository: owner + '/' + repo,
+              exact_main_sha: mainSha,
+              collected_at: new Date().toISOString(),
+              controller: 'NIRA Autonomous Self Completion',
+              cadence: '5 minutes',
+              direct_main_write_authority: false,
+              tasks: plan.tasks.map(task => ({ id: task.id, complete: done(task.id), issue: byTask.get(task.id)?.number || null })),
+              exact_main_workflows: workflowEvidence,
+              active_self_work: activeSelfWork,
+              certified
+            };
+            fs.writeFileSync('nira-self-completion-status.json', JSON.stringify(status, null, 2) + '\n', 'utf8');
+
+            if (certified) {
+              for (const parent of (plan.parent_issues || [])) {
+                try {
+                  const parentIssue = await github.rest.issues.get({ owner, repo, issue_number: Number(parent) });
+                  if (parentIssue.data.state === 'open') {
+                    const parentComments = await comments(Number(parent));
+                    const marker = '<!-- nira-v1-self-completion-certified -->';
+                    if (!parentComments.some(c => String(c.body || '').includes(marker))) {
+                      await github.rest.issues.createComment({
+                        owner, repo, issue_number: Number(parent),
+                        body: [
+                          marker,
+                          'NIRA_V1_SELF_COMPLETION=CERTIFIED',
+                          'EXACT_MAIN_SHA=' + mainSha,
+                          'TASKS=' + plan.tasks.map(t => t.id).join(','),
+                          'REQUIRED_WORKFLOWS=' + required.join(','),
+                          'AUTONOMOUS_CONTROLLER=5_MINUTE_LOOP',
+                          'DIRECT_MAIN_WRITE_AUTHORITY=false'
+                        ].join('\n')
+                      });
+                    }
+                    await github.rest.issues.update({ owner, repo, issue_number: Number(parent), state: 'closed', state_reason: 'completed' });
+                  }
+                } catch (error) {
+                  core.warning('Parent issue #' + parent + ' could not be finalized: ' + error.message);
+                }
+              }
+              core.notice('NIRA_V1_SELF_COMPLETION=CERTIFIED exact_main=' + mainSha);
+            } else {
+              core.notice('NIRA_V1_SELF_COMPLETION=PENDING all_done=' + allDone + ' exact_main_green=' + exactMainGreen + ' active=' + activeSelfWork);
+            }
+
+      - name: Upload autonomous self-completion evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: nira-self-completion-status-${{ github.run_id }}
+          path: nira-self-completion-status.json
+          if-no-files-found: error
