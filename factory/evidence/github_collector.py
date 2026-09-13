@@ -38,6 +38,11 @@ def collect_pr_evidence(
     expected_head_sha: str,
     requirements: EvidenceRequirements,
     collector_identity: str = "nira-github-evidence-collector",
+    worker_id: str = "",
+    lease_id: str = "",
+    validation_result: str = "",
+    recovery_attempt: int = 0,
+    decision: str = "",
 ) -> Evidence:
     """Observe a PR and its exact-head GitHub execution chain."""
     pr = client.pull_request(repo, pr_number)
@@ -136,6 +141,11 @@ def collect_pr_evidence(
         observation_state=state,
         confidence="HIGH" if state == ObservationState.VERIFIED else "NONE",
         collector_identity=collector_identity,
+        worker_id=worker_id,
+        lease_id=lease_id,
+        validation_result=validation_result,
+        recovery_attempt=recovery_attempt,
+        decision=decision,
     )
     evidence.validate()
     return evidence

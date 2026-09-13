@@ -116,6 +116,11 @@ class Evidence:
     observation_state: ObservationState = ObservationState.NOT_EXPOSED
     confidence: str = "NONE"
     collector_identity: str = ""
+    worker_id: str = ""
+    lease_id: str = ""
+    validation_result: str = ""
+    recovery_attempt: int = 0
+    decision: str = ""
     schema_version: str = "1.0"
 
     def validate(self) -> None:
